@@ -2,6 +2,7 @@ import os
 from web3 import Web3
 import requests
 import ipfshttpclient
+from cryptography.fernet import Fernet
 
 class InfuraHandler:
     def __init__(self, project_id=None):
@@ -51,6 +52,32 @@ class InfuraHandler:
             return self.client.cat(file_hash)
         def pin_file(self, file_hash):
             return self.client.pin.add(file_hash)
-            
-            
-        
+    
+    class EncryptionHandler:
+        def __init__(self):
+            self.key = Fernet.generate_key()
+            self.fernet = Fernet(self.key)
+
+        def encrypt_message(self, message):
+            return self.fernet.encrypt(message.encode())
+
+        def decrypt_message(self, encrypted_message):
+            return self.fernet.decrypt(encrypted_message).decode()
+
+    def store_user_interaction(self, user1, user2, interaction_type):
+        # Implement method to store user interactions on the blockchain
+        pass
+
+    def verify_content_ownership(self, user, content_hash):
+        # Implement method to verify content ownership using blockchain
+        pass
+
+    def send_p2p_message(self, sender, recipient, message):
+        encrypted_message = self.encryption.encrypt_message(message)
+        # Implement P2P message sending logic here
+        pass
+
+    def receive_p2p_message(self, sender, encrypted_message):
+        decrypted_message = self.encryption.decrypt_message(encrypted_message)
+        # Implement P2P message receiving logic here
+        return decrypted_message
