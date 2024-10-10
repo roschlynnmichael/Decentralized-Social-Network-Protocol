@@ -1,83 +1,89 @@
 import os
+from dotenv import load_dotenv
+from python_scripts.handlers.message_handler import MessageHandler
+from python_scripts.handlers.p2p_socket_handler import P2PSocketHandler
+from python_scripts.handlers.blockchain_handler import BlockchainHandler
+from python_scripts.handlers.ipfs_handler import IPFSHandler
 from web3 import Web3
-import requests
-import ipfshttpclient
-from cryptography.fernet import Fernet
+
+# Load environment variables
+load_dotenv()
 
 class InfuraHandler:
-    def __init__(self, project_id=None):
-        self.project_id = project_id or os.getenv('INFURA_PROJECT_ID')
+    def __init__(self, app):
+        self.project_id = app.config['INFURA_PROJECT_ID']
+        self.http_endpoint = app.config['INFURA_HTTP_ENDPOINT']
+        self.gas_endpoint = app.config['INFURA_GAS_ENDPOINT']
+        self.ws_endpoint = app.config['INFURA_WS_ENDPOINT']
+
         if not self.project_id:
-            raise ValueError("Infura Project ID must be provided or set as INFURA_PROJECT_ID environment variable")
-        self.ethereum = self.EthereumHandler(self.project_id)
-        self.ipfs = self.IPFSHandler()
+            raise ValueError("INFURA_PROJECT_ID must be set in the environment variables or config")
 
-    class EthereumHandler:
-        def __init__(self, project_id):
-            self.https_w3 = Web3(Web3.HTTPProvider(f'https://mainnet.infura.io/v3/{project_id}'))
-            self.ws_w3 = Web3(Web3.WebSocketProvider(f'wss://mainnet.infura.io/ws/v3/{project_id}'))
-        def check_https_connection(self):
-            return self.https_w3.is_connected()
-        def check_ws_connection(self):
-            return self.ws_w3.is_connected()
-        def get_latest_block(self):
-            return self.https_w3.eth.get_block('latest')
-        def get_balance(self, address):
-            return self.https_w3.eth.get_balance(address)
-        def get_gas_price(self):
-            return self.https_w3.eth.gas_price
-        def estimate_transaction_cost(self, from_address, to_address, value):
-            gas_estimate = self.https_w3.eth.estimate_gas(
-                from_address=from_address,
-                to_address=to_address,
-                value=value
-            )
-            gas_price = self.get_gas_price()
-            return gas_estimate * gas_price
-        def send_transaction(self, transaction):
-            return self.https_w3.eth.send_raw_transaction(transaction)
-        def listen_for_new_blocks(self, callback):
-            def handle_event(event):
-                callback(self.ws_w3.eth.get_block(event))
-            new_block_filter = self.ws_w3.eth.filter('latest')
-            new_block_filter.watch(handle_event)
-    
-    class IPFSHandler:
-        def __init__(self):
-            self.client = ipfshttpclient.connect('/dns/ipfs.io/tcp/443/https')
-        def add_file(self, file_path):
-            res = self.client.add(file_path)
-            return res['Hash']
-        def get_file(self, file_hash):
-            return self.client.cat(file_hash)
-        def pin_file(self, file_hash):
-            return self.client.pin.add(file_hash)
-    
-    class EncryptionHandler:
-        def __init__(self):
-            self.key = Fernet.generate_key()
-            self.fernet = Fernet(self.key)
+        # Initialize Web3 instances
+        self.w3_http = Web3(Web3.HTTPProvider(self.http_endpoint))
+        self.w3_ws = Web3(Web3.WebsocketProvider(self.ws_endpoint))
 
-        def encrypt_message(self, message):
-            return self.fernet.encrypt(message.encode())
+        # Initialize other handlers
+        self.message_handler = MessageHandler()
+        self.p2p_socket = P2PSocketHandler(app)
+        self.ipfs = IPFSHandler()
 
-        def decrypt_message(self, encrypted_message):
-            return self.fernet.decrypt(encrypted_message).decode()
+    def initialize(self):
+        if not self.blockchain.check_https_connection():
+            print("Warning: Unable to connect to Ethereum network via HTTPS")
+        if not self.blockchain.check_ws_connection():
+            print("Warning: Unable to connect to Ethereum network via WebSocket")
 
-    def store_user_interaction(self, user1, user2, interaction_type):
-        # Implement method to store user interactions on the blockchain
-        pass
+    def send_message(self, sender, recipient, message):
+        encrypted_message = self.message_handler.encrypt_message(message)
+        self.p2p_socket.send_message(sender, recipient, encrypted_message)
+        self.blockchain.store_user_interaction(sender, recipient, 'message')
 
-    def verify_content_ownership(self, user, content_hash):
-        # Implement method to verify content ownership using blockchain
-        pass
+    def receive_message(self, sender, encrypted_message):
+        return self.message_handler.decrypt_message(encrypted_message)
 
-    def send_p2p_message(self, sender, recipient, message):
-        encrypted_message = self.encryption.encrypt_message(message)
-        # Implement P2P message sending logic here
-        pass
+    def upload_file_to_ipfs(self, file_path):
+        file_hash = self.ipfs.add_file(file_path)
+        if file_hash:
+            self.blockchain.store_user_interaction(file_hash, 'file_upload')
+        return file_hash
 
-    def receive_p2p_message(self, sender, encrypted_message):
-        decrypted_message = self.encryption.decrypt_message(encrypted_message)
-        # Implement P2P message receiving logic here
-        return decrypted_message
+    def retrieve_file_from_ipfs(self, file_hash):
+        file_content = self.ipfs.get_file(file_hash)
+        if file_content:
+            if self.blockchain.verify_content_ownership(file_hash):
+                return file_content
+            else:
+                print("Warning: File hash not verified on blockchain")
+        return None
+
+    def run(self, app, debug=True):
+        self.p2p_socket.run(app, debug=debug)
+
+    def cleanup(self):
+        if hasattr(self, 'w3_ws'):
+            self.w3_ws.provider.disconnect()
+        self.ipfs.close()
+
+    def get_latest_block(self):
+        return self.w3_http.eth.get_block('latest')
+
+    def get_gas_price(self):
+        return self.w3_http.eth.gas_price
+
+    def estimate_transaction_cost(self, from_address, to_address, value):
+        gas_estimate = self.w3_http.eth.estimate_gas({
+            'from': from_address,
+            'to': to_address,
+            'value': value
+        })
+        gas_price = self.get_gas_price()
+        return gas_estimate * gas_price
+
+    def listen_for_new_blocks(self, callback):
+        def handle_event(event):
+            block = self.w3_ws.eth.get_block(event)
+            callback(block)
+        
+        new_block_filter = self.w3_ws.eth.filter('latest')
+        new_block_filter.watch(handle_event)

@@ -1,0 +1,76 @@
+body {
+    font-size: .875rem;
+    background-color: #f8f9fa;
+}
+
+.sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    padding: 48px 0 0;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    background-color: #ffffff;
+    transition: all 0.3s;
+}
+
+.sidebar-heading {
+    font-size: 1.2rem;
+    color: #495057;
+}
+
+.nav-link {
+    color: #495057;
+    border-radius: 0;
+    transition: all 0.3s;
+}
+
+.nav-link:hover, .nav-link:focus {
+    background-color: #e9ecef;
+}
+
+main {
+    transition: all 0.3s;
+}
+
+#messageArea {
+    height: calc(100vh - 250px);
+    overflow-y: auto;
+    background-color: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    padding: 1rem;
+}
+
+#messageForm {
+    margin-top: 1rem;
+}
+
+.btn-outline-secondary {
+    color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-outline-secondary:hover {
+    color: #fff;
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+#chatSearch, #friendEmailSearch {
+    background-color: #f8f9fa;
+    border: 1px solid #ced4da;
+}
+
+.modal-content {
+    border-radius: 0.3rem;
+}
+
+@media (max-width: 767.98px) {
+    .sidebar {
+        position: static;
+        height: auto;
+        padding-top: 0;
+    }
+}

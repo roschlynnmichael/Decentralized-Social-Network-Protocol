@@ -24,7 +24,3 @@ class User(db.Model, UserMixin):
 
     def __repr__(self):
         return f'<User {self.username}>'
-    
-    @classmethod
-    def find_by_mobile_number(cls, mobile_number):
-        return cls.query.filter_by(mobile_number=mobile_number).first()

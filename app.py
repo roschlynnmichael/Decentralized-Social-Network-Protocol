@@ -9,6 +9,7 @@ import random
 import string
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
+from python_scripts.infura_configurator.infura_handler import InfuraHandler
 
 #Flask Application Setup
 app = Flask(__name__, static_folder = 'static', template_folder = 'templates')

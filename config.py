@@ -15,3 +15,9 @@ class Config:
     MAIL_USE_SSL = True
     MAIL_USERNAME = 'cnetworks361@gmail.com'
     MAIL_PASSWORD = 'etap vwie zggy iruk'
+
+    #Infura Configuration
+    INFURA_PROJECT_ID = 'df4d18360ebc45049c9bc3820d1f00cf'
+    INFURA_HTTP_ENDPOINT = f"https://mainnet.infura.io/v3/{INFURA_PROJECT_ID}"
+    INFURA_GAS_ENDPOINT = f"https://gas.api.infura.io/v3/{INFURA_PROJECT_ID}"
+    INFURA_WS_ENDPOINT = f"wss://mainnet.infura.io/ws/v3/{INFURA_PROJECT_ID}"
