@@ -10,13 +10,11 @@ db = SQLAlchemy()
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=False)
+    password = db.Column(db.String(255), nullable=False)  # Increased length to 255
+    eth_address = db.Column(db.String(42), unique=True, nullable=False)
     is_active = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    blockchain_id = db.Column(db.String(66), unique=True, nullable=True)
-    eth_address = db.Column(db.String(42), unique=True, nullable=True)
 
     def set_password(self, password):
         self.password = generate_password_hash(password)

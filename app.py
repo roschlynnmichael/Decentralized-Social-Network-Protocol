@@ -2,26 +2,23 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from python_scripts.sql_models.models import db, User
-from python_scripts.infura_configurator.infura_handler import InfuraHandler
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from flask_sqlalchemy import SQLAlchemy
 import smtplib
 import random
 import string
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
-from python_scripts.infura_configurator.infura_handler import InfuraHandler
 from flask_socketio import SocketIO, emit
-from sqlalchemy_utils import database_exists, create_database
 import requests
 import json
-from web3 import Web3
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
 from urllib.parse import quote
 from dotenv import load_dotenv
+from python_scripts.eth_account_maker.eth_account_generator import generate_eth_address
+from sqlalchemy_utils import database_exists, create_database
 
 load_dotenv()
 
@@ -38,15 +35,18 @@ mail = Mail(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-#Infura Handler Setup
-infura_handler = InfuraHandler(app)
-
 # Configuration for mail server, serializer and SQLAlchemy
 db.init_app(app)
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
 # IPFS API endpoint
 IPFS_API = f'http://{Config.EC2_PUBLIC_IP}:8080/api/v0'
+
+def create_database_if_not_exists(app):
+    engine = db.create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
+    if not database_exists(engine.url):
+        create_database(engine.url)
+    print(f"Database {engine.url.database} {'exists' if database_exists(engine.url) else 'created'}")
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -81,8 +81,11 @@ def register():
     if User.query.filter_by(email=email).first():
         return jsonify({"Error": "Email already exists"}), 400
     
-    hashed_password = generate_password_hash(password)
-    user = User(username=username, email=email, password=hashed_password)
+    # Generate Ethereum address
+    eth_address, eth_private_key = generate_eth_address()
+
+    user = User(username=username, email=email, eth_address=eth_address)
+    user.set_password(password)
     db.session.add(user)
     db.session.commit()
 
@@ -99,6 +102,7 @@ def register():
         send_email(subject, body, sender, recipients, password)
         return jsonify({
             "message": "Registration successful. Please check your email for activation link.",
+            "eth_address": eth_address
         }), 201
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
@@ -155,19 +159,8 @@ def activate(token):
     if user:
         if not user.is_active:
             user.is_active = True
-            
-            try:
-                # This returns a transaction object
-                transaction = infura_handler.register_user(user.username, user.eth_address)
-                
-                # In a real-world scenario, you would need to sign and send this transaction
-                # For now, we'll just consider the user registered if no exception was raised
-                user.blockchain_id = user.eth_address  # Using eth_address as blockchain_id for simplicity
-                db.session.commit()
-                return jsonify({"message": "Your account has been activated and prepared for blockchain registration."}), 200
-            except Exception as e:
-                db.session.rollback()
-                return jsonify({"error": f"Account activated but blockchain registration failed: {str(e)}"}), 500
+            db.session.commit()
+            return jsonify({"message": "Your account has been activated successfully."}), 200
         else:
             return jsonify({"message": "Your account is already activated."}), 200
     else:
@@ -210,33 +203,6 @@ def logout():
 def dashboard():
     return render_template('dashboard.html')
 
-@app.route('/api/register_blockchain', methods=['POST'])
-@login_required
-def register_blockchain():
-    data = request.json
-    eth_address = Web3.to_checksum_address(data['eth_address'])
-
-    try:
-        transaction = infura_handler.register_user(current_user.username, eth_address)
-        if transaction:
-            # In a real-world scenario, you would sign and send this transaction here
-            # For now, we'll just return the transaction object
-            return jsonify({
-                'success': True,
-                'message': 'User registration transaction created',
-                'transaction': transaction
-            }), 200
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'User already exists on the blockchain'
-            }), 400
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 400
-
 @app.errorhandler(500)
 def internal_error(error):
     return jsonify({"error": "An internal server error occurred. Please try again later."}), 500
@@ -248,6 +214,7 @@ def handle_exception(e):
 
 if __name__ == '__main__':
     with app.app_context():
+        create_database_if_not_exists(app)
         db.create_all()
     socketio.init_app(app)
     socketio.run(app, debug=True)

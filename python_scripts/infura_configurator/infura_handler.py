@@ -2,7 +2,6 @@ import os
 from dotenv import load_dotenv
 from python_scripts.handlers.message_handler import MessageHandler
 from python_scripts.handlers.p2p_socket_handler import P2PSocketHandler
-from python_scripts.handlers.blockchain_handler import BlockchainHandler
 from python_scripts.handlers.ipfs_handler import IPFSHandler
 from web3 import Web3
 from web3.providers import LegacyWebSocketProvider
@@ -12,18 +11,12 @@ import json
 # Load environment variables
 load_dotenv()
 
-base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-json_path = os.path.join(base_dir, 'json_files', 'UserRegistry.json')
-
 class InfuraHandler:
     def __init__(self, app):
         self.project_id = app.config['INFURA_PROJECT_ID']
         self.http_endpoint = app.config['INFURA_HTTP_ENDPOINT']
         self.gas_endpoint = app.config['INFURA_GAS_ENDPOINT']
         self.ws_endpoint = app.config['INFURA_WS_ENDPOINT']
-
-        if not self.project_id:
-            raise ValueError("INFURA_PROJECT_ID must be set in the environment variables or config")
 
         # Initialize Web3 instances
         self.w3_http = Web3(Web3.HTTPProvider(self.http_endpoint))
@@ -39,15 +32,6 @@ class InfuraHandler:
         
         self.p2p_socket = P2PSocketHandler(app)
         self.ipfs = IPFSHandler()
-
-        # Initialize BlockchainHandler
-        self.blockchain = BlockchainHandler(self.project_id)
-
-        # Load your contract ABI and address
-        with open(json_path, 'r') as f:
-            contract_json = json.load(f)
-        self.contract_address = Web3.to_checksum_address('0xd9145CCE52D386f254917e481eB44e9943F39138')
-        self.contract = self.w3_ws.eth.contract(address=self.contract_address, abi=contract_json['abi'])
 
     def initialize(self):
         if not self.blockchain.check_https_connection():
@@ -108,33 +92,3 @@ class InfuraHandler:
         
         new_block_filter = self.w3_ws.eth.filter('latest')
         new_block_filter.watch(handle_event)
-
-    def register_user(self, username, eth_address):
-        if not eth_address:
-            raise ValueError("Ethereum address is required for blockchain registration")
-        
-        eth_address = Web3.to_checksum_address(eth_address)
-        
-        # Check if user already exists
-        if self.contract.functions.userExists(eth_address).call():
-            raise ValueError("User already registered on blockchain")
-        
-        # Prepare the transaction
-        transaction = self.contract.functions.registerUser(username).build_transaction({
-            'from': eth_address,
-            'gas': 2000000,
-            'gasPrice': self.w3_ws.eth.gas_price,
-            'nonce': self.w3_ws.eth.get_transaction_count(eth_address),
-        })
-        
-        # In a real-world scenario, you would need to sign this transaction with the user's private key
-        # For demonstration, we'll just return the transaction object
-        return transaction
-
-    def user_exists(self, eth_address):
-        eth_address = Web3.to_checksum_address(eth_address)
-        return self.contract.functions.userExists(eth_address).call()
-
-    def get_user(self, eth_address):
-        eth_address = Web3.to_checksum_address(eth_address)
-        return self.contract.functions.getUser(eth_address).call()
