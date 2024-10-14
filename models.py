@@ -1,6 +1,3 @@
-#p2p_user
-#Dsouza@3191
-#rootlocalhost:roschlynnmichael
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from flask_login import UserMixin
@@ -16,7 +13,6 @@ class User(db.Model, UserMixin):
     is_active = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     blockchain_id = db.Column(db.String(66), unique=True, nullable=True)
-    eth_address = db.Column(db.String(42), unique=True, nullable=True)
 
     def set_password(self, password):
         self.password = generate_password_hash(password)

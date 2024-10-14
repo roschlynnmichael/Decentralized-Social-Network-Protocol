@@ -1,8 +1,10 @@
 import os
 from urllib.parse import quote
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Config:
-    #SQL Configuration
     DB_PASSWORD = quote('Dsouza@3191')
     SECRET_KEY = os.urandom(32)
     SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://p2p_user:{DB_PASSWORD}@localhost:3306/p2p_social_network'

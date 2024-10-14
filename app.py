@@ -2,8 +2,9 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from python_scripts.sql_models.models import db, User
+from python_scripts.infura_configurator.infura_handler import InfuraHandler
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from config import Config
+from flask_sqlalchemy import SQLAlchemy
 import smtplib
 import random
 import string
@@ -11,19 +12,34 @@ from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
 from python_scripts.infura_configurator.infura_handler import InfuraHandler
 from flask_socketio import SocketIO, emit
+from sqlalchemy_utils import database_exists, create_database
 import requests
 import json
+from web3 import Web3
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import Config
+from urllib.parse import quote
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # SocketIO Setup
 socketio = SocketIO()
 
 # Flask Application Setup
 app = Flask(__name__, static_folder='static', template_folder='templates')
-app.config.from_object(Config)
+app.config.from_object('config.Config')
+
+mail = Mail(app)
 
 # Login Manager Setup
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+#Infura Handler Setup
+infura_handler = InfuraHandler(app)
 
 # Configuration for mail server, serializer and SQLAlchemy
 db.init_app(app)
@@ -139,8 +155,19 @@ def activate(token):
     if user:
         if not user.is_active:
             user.is_active = True
-            db.session.commit()
-            return jsonify({"message": "Your account has been activated successfully."}), 200
+            
+            try:
+                # This returns a transaction object
+                transaction = infura_handler.register_user(user.username, user.eth_address)
+                
+                # In a real-world scenario, you would need to sign and send this transaction
+                # For now, we'll just consider the user registered if no exception was raised
+                user.blockchain_id = user.eth_address  # Using eth_address as blockchain_id for simplicity
+                db.session.commit()
+                return jsonify({"message": "Your account has been activated and prepared for blockchain registration."}), 200
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({"error": f"Account activated but blockchain registration failed: {str(e)}"}), 500
         else:
             return jsonify({"message": "Your account is already activated."}), 200
     else:
@@ -183,78 +210,32 @@ def logout():
 def dashboard():
     return render_template('dashboard.html')
 
-@app.route('/api/chats')
+@app.route('/api/register_blockchain', methods=['POST'])
 @login_required
-def get_chats():
-    # TODO: Implement fetching user's chats from the database
-    # For now, return dummy data
-    chats = [
-        {'id': 1, 'name': 'Chat 1', 'last_message': 'Hello'},
-        {'id': 2, 'name': 'Chat 2', 'last_message': 'How are you?'},
-    ]
-    return jsonify(chats)
-
-@app.route('/api/chat/<int:chat_id>/messages')
-@login_required
-def get_chat_messages(chat_id):
-    # TODO: Implement fetching messages from IPFS using the chat_id
-    # For now, return dummy data
-    messages = [
-        {'sender': 'User1', 'content': 'Hello'},
-        {'sender': 'User2', 'content': 'Hi there!'},
-    ]
-    return jsonify(messages)
-
-@app.route('/api/send_message', methods=['POST'])
-@login_required
-def send_message():
+def register_blockchain():
     data = request.json
-    chat_id = data['chat_id']
-    content = data['content']
-    
-    message = {
-        'sender': current_user.username,
-        'content': content,
-        'chat_id': chat_id
-    }
-    
-    # Add message to IPFS
-    files = {'file': json.dumps(message)}
-    response = requests.post(f'{IPFS_API}/add', files=files)
-    ipfs_hash = response.json()['Hash']
-    
-    # TODO: Update your database with the new IPFS hash
-    
-    # Broadcast the new message to all connected clients
-    socketio.emit('new_message', message)
-    
-    return jsonify({'success': True, 'ipfs_hash': ipfs_hash})
+    eth_address = Web3.to_checksum_address(data['eth_address'])
 
-@app.route('/api/search_friends')
-@login_required
-def search_friends():
-    query = request.args.get('query', '')
-    # TODO: Implement searching for users in your database
-    # For now, return dummy data
-    results = [
-        {'id': 1, 'username': 'user1'},
-        {'id': 2, 'username': 'user2'},
-    ]
-    return jsonify(results)
-
-@app.route('/api/start_chat', methods=['POST'])
-@login_required
-def start_chat():
-    data = request.json
-    user_id = data.get('user_id')
-    # TODO: Implement creating a new chat in your database
-    # For now, return dummy data
-    new_chat = {
-        'id': 3,
-        'name': f'Chat with User {user_id}',
-        'last_message': 'New chat started'
-    }
-    return jsonify({'success': True, 'chat': new_chat})
+    try:
+        transaction = infura_handler.register_user(current_user.username, eth_address)
+        if transaction:
+            # In a real-world scenario, you would sign and send this transaction here
+            # For now, we'll just return the transaction object
+            return jsonify({
+                'success': True,
+                'message': 'User registration transaction created',
+                'transaction': transaction
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'User already exists on the blockchain'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 400
 
 @app.errorhandler(500)
 def internal_error(error):

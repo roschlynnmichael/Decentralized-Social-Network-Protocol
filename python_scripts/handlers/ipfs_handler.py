@@ -1,80 +1,41 @@
-import ipfshttpclient
+import requests
+from requests.auth import HTTPBasicAuth
+import time
 
 class IPFSHandler:
-    def __init__(self):
-        try:
-            # Connect to the IPFS daemon
-            self.client = ipfshttpclient.connect('/dns/ipfs.io/tcp/443/https')
-        except ipfshttpclient.exceptions.ConnectionError:
-            print("Unable to connect to IPFS. Make sure the IPFS daemon is running.")
-            self.client = None
+    def __init__(self, max_retries=3):
+        self.max_retries = max_retries
+        self.ipfs_api_url = "http://13.59.2.130:8080/api/v0"
+        self.auth = HTTPBasicAuth('roschlynnmichael', 'Dsouza3191@')
+        self.session = requests.Session()
+        self.session.auth = self.auth
+        self.connect_to_ipfs()
+
+    def connect_to_ipfs(self):
+        for attempt in range(self.max_retries):
+            try:
+                response = self.session.post(f"{self.ipfs_api_url}/version")
+                response.raise_for_status()
+                print("Successfully connected to IPFS")
+                return
+            except Exception as e:
+                print(f"Attempt {attempt + 1} failed: {str(e)}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                else:
+                    print("Failed to connect to IPFS after multiple attempts")
+                    raise
 
     def add_file(self, file_path):
-        """
-        Add a file to IPFS and return its hash.
-        """
-        if not self.client:
-            return None
-        try:
-            res = self.client.add(file_path)
-            return res['Hash']
-        except Exception as e:
-            print(f"Error adding file to IPFS: {e}")
-            return None
+        with open(file_path, 'rb') as file:
+            files = {'file': file}
+            response = self.session.post(f"{self.ipfs_api_url}/add", files=files)
+            response.raise_for_status()
+            return response.json()['Hash']
 
     def get_file(self, file_hash):
-        """
-        Retrieve a file from IPFS using its hash.
-        """
-        if not self.client:
-            return None
-        try:
-            return self.client.cat(file_hash)
-        except Exception as e:
-            print(f"Error retrieving file from IPFS: {e}")
-            return None
+        response = self.session.post(f"{self.ipfs_api_url}/cat", params={'arg': file_hash})
+        response.raise_for_status()
+        return response.content
 
-    def pin_file(self, file_hash):
-        """
-        Pin a file in IPFS to ensure it's not garbage collected.
-        """
-        if not self.client:
-            return False
-        try:
-            self.client.pin.add(file_hash)
-            return True
-        except Exception as e:
-            print(f"Error pinning file in IPFS: {e}")
-            return False
-
-    def add_json(self, json_data):
-        """
-        Add JSON data to IPFS and return its hash.
-        """
-        if not self.client:
-            return None
-        try:
-            res = self.client.add_json(json_data)
-            return res
-        except Exception as e:
-            print(f"Error adding JSON to IPFS: {e}")
-            return None
-
-    def get_json(self, json_hash):
-        """
-        Retrieve JSON data from IPFS using its hash.
-        """
-        if not self.client:
-            return None
-        try:
-            return self.client.get_json(json_hash)
-        except Exception as e:
-            print(f"Error retrieving JSON from IPFS: {e}")
-            return None
-
-    def close(self):
-        """
-        Close the IPFS client connection.
-        """
-        if self.client:
-            self.client.close()
+    # Add more methods as needed for your IPFS operations
