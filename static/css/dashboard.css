@@ -32,6 +32,7 @@ body {
 
 main {
     transition: all 0.3s;
+    padding-top: 2rem;
 }
 
 #messageArea {
@@ -67,10 +68,100 @@ main {
     border-radius: 0.3rem;
 }
 
+/* Styles for the button toolbar */
+.btn-toolbar {
+    display: flex;
+    align-items: center;
+}
+
+/* Styles for all buttons in the toolbar */
+.btn-toolbar .btn {
+    margin-left: 0.5rem;
+}
+
+/* Specific styles for the logout button */
+.btn-outline-danger {
+    color: #dc3545;
+    border-color: #dc3545;
+}
+
+.btn-outline-danger:hover {
+    color: #fff;
+    background-color: #dc3545;
+    border-color: #dc3545;
+}
+
+/* Ensure buttons are visible on smaller screens */
 @media (max-width: 767.98px) {
     .sidebar {
         position: static;
         height: auto;
         padding-top: 0;
+    }
+
+    .btn-toolbar {
+        margin-top: 1rem;
+        justify-content: flex-start;
+    }
+
+    .btn-toolbar .btn {
+        margin-left: 0;
+        margin-right: 0.5rem;
+    }
+}
+
+/* Adjust main content padding for better spacing */
+main {
+    padding-top: 2rem;
+}
+
+/* Ensure the welcome message and buttons don't overlap */
+.d-flex.justify-content-between {
+    flex-wrap: wrap;
+}
+
+.h2 {
+    margin-bottom: 1rem;
+}
+
+/* Specific styles for the logout button */
+#logoutBtn {
+    display: inline-block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    color: #dc3545;
+    border-color: #dc3545;
+    background-color: transparent;
+    margin-left: 10px;
+}
+
+#logoutBtn:hover {
+    color: #fff;
+    background-color: #dc3545;
+    border-color: #dc3545;
+}
+
+/* Ensure the button toolbar is visible */
+.btn-toolbar {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 767.98px) {
+    .d-flex.justify-content-between {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .btn-toolbar {
+        margin-top: 1rem;
+        width: 100%;
+    }
+
+    #searchBtn, #logoutBtn {
+        width: 100%;
+        margin-bottom: 0.5rem;
     }
 }

@@ -17,25 +17,21 @@ document.addEventListener('DOMContentLoaded', function() {
     // Socket event listeners
     socket.on('connect', () => {
         console.log('Connected to server');
-        // TODO: Fetch user's chats and populate chatList
+        fetchUserChats();
     });
 
     socket.on('new_message', (data) => {
         if (data.chat_id === currentChatId) {
-            appendMessage(data.sender, data.message);
+            appendMessage(data.sender, data.content);
         }
-        // TODO: Update chat list to show new message preview
+        updateChatPreview(data.chat_id, data.content);
     });
 
     // Event listeners
     messageForm.addEventListener('submit', (e) => {
         e.preventDefault();
         if (messageInput.value && currentChatId) {
-            socket.emit('send_message', {
-                chat_id: currentChatId,
-                message: messageInput.value
-            });
-            appendMessage('You', messageInput.value);
+            sendMessage(currentChatId, messageInput.value);
             messageInput.value = '';
         }
     });
@@ -45,12 +41,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     friendEmailSearch.addEventListener('input', debounce(() => {
-        // TODO: Implement friend search functionality
-        searchResults.innerHTML = '<p>Searching...</p>';
+        searchFriends(friendEmailSearch.value);
     }, 300));
 
     logoutBtn.addEventListener('click', () => {
-        // TODO: Implement logout functionality
         window.location.href = '/logout';
     });
 
@@ -85,7 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
         currentChatName.textContent = name;
         chatArea.classList.remove('d-none');
         messageArea.innerHTML = '';
-        // TODO: Fetch and display chat history
+        fetchChatHistory(chatId);
     }
 
     function debounce(func, wait) {
@@ -100,5 +94,84 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
-    // TODO: Implement functions to fetch user's chats, chat history, and search for friends
+    // IPFS-related functions
+    function fetchUserChats() {
+        fetch('/api/chats')
+            .then(response => response.json())
+            .then(chats => {
+                chatList.innerHTML = '';
+                chats.forEach(chat => {
+                    addChatToList(chat.id, `Chat ${chat.id}`, chat.last_message || 'No messages yet');
+                });
+            });
+    }
+
+    function fetchChatHistory(chatId) {
+        fetch(`/api/chat/${chatId}/messages`)
+            .then(response => response.json())
+            .then(messages => {
+                messageArea.innerHTML = '';
+                messages.forEach(msg => appendMessage(msg.sender, msg.content));
+            });
+    }
+
+    function sendMessage(chatId, content) {
+        fetch('/api/send_message', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_id: chatId,
+                content: content
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                appendMessage('You', content);
+            }
+        });
+    }
+
+    function updateChatPreview(chatId, lastMessage) {
+        const chatLink = chatList.querySelector(`[data-chat-id="${chatId}"]`);
+        if (chatLink) {
+            const previewElement = chatLink.querySelector('small');
+            previewElement.textContent = lastMessage;
+        }
+    }
+
+    function searchFriends(query) {
+        fetch(`/api/search_friends?query=${encodeURIComponent(query)}`)
+            .then(response => response.json())
+            .then(results => {
+                searchResults.innerHTML = '';
+                results.forEach(user => {
+                    const userElement = document.createElement('div');
+                    userElement.className = 'search-result';
+                    userElement.textContent = user.username;
+                    userElement.addEventListener('click', () => startChat(user.id));
+                    searchResults.appendChild(userElement);
+                });
+            });
+    }
+
+    function startChat(userId) {
+        fetch('/api/start_chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ user_id: userId }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                searchFriendsModal.hide();
+                addChatToList(data.chat_id, data.chat_name, 'New chat');
+                openChat(data.chat_id, data.chat_name);
+            }
+        });
+    }
 });

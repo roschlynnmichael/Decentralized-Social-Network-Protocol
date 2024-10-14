@@ -21,3 +21,6 @@ class Config:
     INFURA_HTTP_ENDPOINT = f"https://mainnet.infura.io/v3/{INFURA_PROJECT_ID}"
     INFURA_GAS_ENDPOINT = f"https://gas.api.infura.io/v3/{INFURA_PROJECT_ID}"
     INFURA_WS_ENDPOINT = f"wss://mainnet.infura.io/ws/v3/{INFURA_PROJECT_ID}"
+
+    #AWS EC2 Configuration
+    EC2_PUBLIC_IP = '13.59.2.130'
