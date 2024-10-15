@@ -16,6 +16,15 @@ class User(db.Model, UserMixin):
     eth_address = db.Column(db.String(42), unique=True, nullable=False)
     is_active = db.Column(db.Boolean, default=False)
 
+    friends = db.relationship(
+        'User',
+        secondary = 'friendships',
+        primaryjoin = ('friendships.c.user_id == User.id'),
+        secondaryjoin = ('friendships.c.friend_id == User.id'),
+        backref = db.backref('friended_by', lazy = 'dynamic'),
+        lazy = 'dynamic'
+    )
+
     def set_password(self, password):
         self.password = generate_password_hash(password)
 
@@ -24,3 +33,19 @@ class User(db.Model, UserMixin):
 
     def __repr__(self):
         return f'<User {self.username}>'
+    
+class FriendRequest(db.Model):
+    id = db.Column(db.Integer, primary_key = True)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable = False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable = False)
+    status = db.Column(db.String(20), default = 'pending')
+    timestamp = db.Column(db.DateTime, default = datetime.utcnow)
+
+    sender = db.relationship('User', foreign_keys = [sender_id], backref = 'sent_requests')
+    receiver = db.relationship('User', foreign_keys = [receiver_id], backref = 'received_requests')
+
+friendships = db.Table(
+    'friendships',
+    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key = True),
+    db.Column('friend_id', db.Integer, db.ForeignKey('user.id'), primary_key = True)
+)

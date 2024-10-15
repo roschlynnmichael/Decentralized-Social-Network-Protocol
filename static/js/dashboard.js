@@ -6,11 +6,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const messageInput = document.getElementById('messageInput');
     const chatArea = document.getElementById('chatArea');
     const currentChatName = document.getElementById('currentChatName');
-    const searchFriendsBtn = document.getElementById('searchFriendsBtn');
-    const searchFriendsModal = new bootstrap.Modal(document.getElementById('searchFriendsModal'));
-    const friendEmailSearch = document.getElementById('friendEmailSearch');
-    const searchResults = document.getElementById('searchResults');
+    const friendSearch = document.getElementById('friendSearch');
     const logoutBtn = document.getElementById('logoutBtn');
+    const notificationList = document.getElementById('notificationList');
+    const notificationBadge = document.getElementById('notificationBadge');
+    const usernameSpan = document.getElementById('username');
+    const noNotifications = document.getElementById('noNotifications');
+    const friendSearchResults = document.getElementById('friendSearchResults');
 
     let currentChatId = null;
 
@@ -18,6 +20,8 @@ document.addEventListener('DOMContentLoaded', function() {
     socket.on('connect', () => {
         console.log('Connected to server');
         fetchUserChats();
+        loadFriendRequests();
+        fetchUsername();
     });
 
     socket.on('new_message', (data) => {
@@ -36,12 +40,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    searchFriendsBtn.addEventListener('click', () => {
-        searchFriendsModal.show();
-    });
-
-    friendEmailSearch.addEventListener('input', debounce(() => {
-        searchFriends(friendEmailSearch.value);
+    friendSearch.addEventListener('input', debounce(() => {
+        searchFriends(friendSearch.value);
     }, 300));
 
     logoutBtn.addEventListener('click', () => {
@@ -143,35 +143,128 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function searchFriends(query) {
-        fetch(`/api/search_friends?query=${encodeURIComponent(query)}`)
+        if (query.length < 3) {
+            friendSearchResults.innerHTML = '<li class="list-group-item">Type at least 3 characters to search</li>';
+            return;
+        }
+
+        fetch(`/api/search_users?query=${encodeURIComponent(query)}`)
             .then(response => response.json())
-            .then(results => {
-                searchResults.innerHTML = '';
-                results.forEach(user => {
-                    const userElement = document.createElement('div');
-                    userElement.className = 'search-result';
-                    userElement.textContent = user.username;
-                    userElement.addEventListener('click', () => startChat(user.id));
-                    searchResults.appendChild(userElement);
-                });
-            });
+            .then(users => {
+                friendSearchResults.innerHTML = '';
+                if (users.length === 0) {
+                    friendSearchResults.innerHTML = '<li class="list-group-item">No users found</li>';
+                } else {
+                    users.forEach(user => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                        li.innerHTML = `
+                            ${user.username}
+                            <button class="btn btn-sm btn-primary add-friend-btn" data-user-id="${user.id}">Add Friend</button>
+                        `;
+                        li.querySelector('.add-friend-btn').addEventListener('click', () => sendFriendRequest(user.id));
+                        friendSearchResults.appendChild(li);
+                    });
+                }
+            })
+            .catch(error => console.error('Error searching users:', error));
     }
 
-    function startChat(userId) {
-        fetch('/api/start_chat', {
+    function sendFriendRequest(userId) {
+        fetch('/api/send_friend_request', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ user_id: userId }),
+            body: JSON.stringify({ receiver_id: userId }),
         })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw err; });
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data.message);
+        })
+        .catch(error => {
+            console.error('Error sending friend request:', error);
+            alert(error.error || 'An error occurred while sending the friend request.');
+        });
+    }
+
+    function loadFriendRequests() {
+        fetch('/friend_requests')
+        .then(response => response.json())
+        .then(requests => {
+            notificationList.innerHTML = ''; // Clear existing notifications
+            if (requests.length === 0) {
+                notificationBadge.style.display = 'none';
+                notificationList.innerHTML = '<li class="dropdown-item" id="noNotifications">No notifications for today</li>';
+            } else {
+                notificationBadge.style.display = 'inline-block';
+                notificationBadge.textContent = requests.length;
+                requests.forEach(request => {
+                    const li = document.createElement('li');
+                    li.className = 'notification-item dropdown-item';
+                    li.innerHTML = `
+                        <div>${request.sender_username} wants to be your friend</div>
+                        <div class="notification-buttons">
+                            <button class="btn btn-sm btn-success accept-request" data-request-id="${request.id}">Accept</button>
+                            <button class="btn btn-sm btn-danger reject-request" data-request-id="${request.id}">Reject</button>
+                        </div>
+                    `;
+                    li.querySelector('.accept-request').addEventListener('click', () => acceptFriendRequest(request.id));
+                    li.querySelector('.reject-request').addEventListener('click', () => rejectFriendRequest(request.id));
+                    notificationList.appendChild(li);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading friend requests:', error));
+    }
+
+    function acceptFriendRequest(requestId) {
+        fetch(`/accept_friend_request/${requestId}`, { method: 'POST' })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw err; });
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data.message);
+            loadFriendRequests(); // Reload the friend requests instead of full page reload
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert(error.error || 'An error occurred while accepting the friend request.');
+        });
+    }
+
+    function rejectFriendRequest(requestId) {
+        fetch(`/reject_friend_request/${requestId}`, { method: 'POST' })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw err; });
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data.message);
+            loadFriendRequests(); // Reload the friend requests instead of full page reload
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert(error.error || 'An error occurred while rejecting the friend request.');
+        });
+    }
+
+    function fetchUsername() {
+        fetch('/api/current_user')
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
-                searchFriendsModal.hide();
-                addChatToList(data.chat_id, data.chat_name, 'New chat');
-                openChat(data.chat_id, data.chat_name);
-            }
-        });
+            usernameSpan.textContent = data.username;
+        })
+        .catch(error => console.error('Error fetching username:', error));
     }
 });

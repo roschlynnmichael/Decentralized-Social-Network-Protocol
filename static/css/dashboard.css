@@ -3,13 +3,18 @@ body {
     background-color: #f8f9fa;
 }
 
+.navbar {
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+
 .sidebar {
     position: fixed;
-    top: 0;
+    top: 56px; /* Adjusted to account for navbar height */
     bottom: 0;
     left: 0;
     z-index: 100;
-    padding: 48px 0 0;
+    padding: 20px 0 0;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
     background-color: #ffffff;
     transition: all 0.3s;
@@ -18,6 +23,8 @@ body {
 .sidebar-heading {
     font-size: 1.2rem;
     color: #495057;
+    padding-left: 1rem;
+    padding-right: 1rem;
 }
 
 .nav-link {
@@ -32,7 +39,7 @@ body {
 
 main {
     transition: all 0.3s;
-    padding-top: 2rem;
+    padding-top: 56px; /* Adjusted to account for navbar height */
 }
 
 #messageArea {
@@ -48,50 +55,38 @@ main {
     margin-top: 1rem;
 }
 
-.btn-outline-secondary {
-    color: #6c757d;
-    border-color: #6c757d;
+#friendSearch {
+    margin-bottom: 1rem;
+    margin-left: 1rem;
+    margin-right: 1rem;
+    width: calc(100% - 2rem);
 }
 
-.btn-outline-secondary:hover {
-    color: #fff;
-    background-color: #6c757d;
-    border-color: #6c757d;
+.dropdown-menu {
+    max-height: 300px;
+    overflow-y: auto;
 }
 
-#chatSearch, #friendEmailSearch {
-    background-color: #f8f9fa;
-    border: 1px solid #ced4da;
+.notification-item {
+    padding: 10px;
+    border-bottom: 1px solid #dee2e6;
 }
 
-.modal-content {
-    border-radius: 0.3rem;
+.notification-item:last-child {
+    border-bottom: none;
 }
 
-/* Styles for the button toolbar */
-.btn-toolbar {
+.notification-buttons {
     display: flex;
-    align-items: center;
+    justify-content: space-between;
+    margin-top: 5px;
 }
 
-/* Styles for all buttons in the toolbar */
-.btn-toolbar .btn {
-    margin-left: 0.5rem;
+.notification-buttons button {
+    flex: 1;
+    margin: 0 5px;
 }
 
-/* Specific styles for the logout button */
-.btn-outline-danger {
-    color: #dc3545;
-    border-color: #dc3545;
-}
-
-.btn-outline-danger:hover {
-    color: #fff;
-    background-color: #dc3545;
-    border-color: #dc3545;
-}
-
-/* Ensure buttons are visible on smaller screens */
 @media (max-width: 767.98px) {
     .sidebar {
         position: static;
@@ -99,69 +94,27 @@ main {
         padding-top: 0;
     }
 
-    .btn-toolbar {
-        margin-top: 1rem;
-        justify-content: flex-start;
-    }
-
-    .btn-toolbar .btn {
-        margin-left: 0;
-        margin-right: 0.5rem;
+    main {
+        padding-top: 20px;
     }
 }
 
-/* Adjust main content padding for better spacing */
-main {
-    padding-top: 2rem;
-}
+/* Add these styles to your existing CSS */
 
-/* Ensure the welcome message and buttons don't overlap */
-.d-flex.justify-content-between {
-    flex-wrap: wrap;
-}
-
-.h2 {
+#sidebarTabs {
     margin-bottom: 1rem;
 }
 
-/* Specific styles for the logout button */
-#logoutBtn {
-    display: inline-block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    color: #dc3545;
-    border-color: #dc3545;
-    background-color: transparent;
-    margin-left: 10px;
+#sidebarTabContent {
+    padding: 0 1rem;
 }
 
-#logoutBtn:hover {
-    color: #fff;
-    background-color: #dc3545;
-    border-color: #dc3545;
+#friendSearchResults {
+    max-height: calc(100vh - 250px);
+    overflow-y: auto;
 }
 
-/* Ensure the button toolbar is visible */
-.btn-toolbar {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-}
-
-/* Responsive adjustments */
-@media (max-width: 767.98px) {
-    .d-flex.justify-content-between {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .btn-toolbar {
-        margin-top: 1rem;
-        width: 100%;
-    }
-
-    #searchBtn, #logoutBtn {
-        width: 100%;
-        margin-bottom: 0.5rem;
-    }
+.add-friend-btn {
+    font-size: 0.8rem;
+    padding: 0.2rem 0.5rem;
 }

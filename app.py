@@ -1,7 +1,7 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
-from python_scripts.sql_models.models import db, User
+from python_scripts.sql_models.models import db, User, FriendRequest
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 import smtplib
 import random
@@ -19,6 +19,7 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 from python_scripts.eth_account_maker.eth_account_generator import generate_eth_address
 from sqlalchemy_utils import database_exists, create_database
+from datetime import datetime
 
 load_dotenv()
 
@@ -50,7 +51,7 @@ def create_database_if_not_exists(app):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 # Function to send email
 def send_email(subject, body, sender, recipients, password):
@@ -146,6 +147,119 @@ def reset_password(token):
         return jsonify({"message": "Your password has been updated."}), 200
     return jsonify({"error": "User not found."}), 404
 
+@app.route('/send_friend_request', methods=['POST'])
+@login_required
+def send_friend_request():
+    data = request.json
+    receiver_username = data.get('receiver_username')
+    receiver = User.query.filter_by(username=receiver_username).first()
+
+    if not receiver:
+        return jsonify({"error": "User not found."}), 404
+    
+    if receiver == current_user:
+        return jsonify({"error": "You cannot send a friend request to yourself."}), 400
+    
+    # Check if they are already friends
+    if current_user.friends.filter_by(id=receiver.id).first():
+        return jsonify({"error": "You are already friends with this user."}), 400
+    
+    # Check for existing friend requests in both directions
+    existing_request = FriendRequest.query.filter(
+        ((FriendRequest.sender == current_user) & (FriendRequest.receiver == receiver)) |
+        ((FriendRequest.sender == receiver) & (FriendRequest.receiver == current_user))
+    ).first()
+
+    if existing_request:
+        if existing_request.status == 'pending':
+            if existing_request.sender == current_user:
+                return jsonify({"error": "You have already sent a friend request to this user."}), 400
+            else:
+                return jsonify({"error": "This user has already sent you a friend request. Check your pending requests."}), 400
+        elif existing_request.status == 'accepted':
+            return jsonify({"error": "You are already friends with this user."}), 400
+        elif existing_request.status == 'rejected':
+            # If a previous request was rejected, we can allow a new request
+            existing_request.status = 'pending'
+            existing_request.sender = current_user
+            existing_request.receiver = receiver
+            existing_request.timestamp = datetime.utcnow()
+            db.session.commit()
+            return jsonify({"message": "Friend request sent successfully."}), 200
+    
+    # If no existing request, create a new one
+    new_request = FriendRequest(sender=current_user, receiver=receiver)
+    db.session.add(new_request)
+    db.session.commit()
+
+    return jsonify({"message": "Friend request sent successfully."}), 200
+
+@app.route('/accept_friend_request/<int:request_id>', methods=['POST'])
+@login_required
+def accept_friend_request(request_id):
+    friend_request = FriendRequest.query.get_or_404(request_id)
+    
+    if friend_request.receiver != current_user:
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    if friend_request.status != 'pending':
+        return jsonify({"error": "This request has already been processed"}), 400
+    
+    friend_request.status = 'accepted'
+    
+    # Add each user to the other's friends list
+    current_user.friends.append(friend_request.sender)
+    friend_request.sender.friends.append(current_user)
+    
+    db.session.commit()
+    
+    return jsonify({"message": "Friend request accepted"}), 200
+
+@app.route('/reject_friend_request/<int:request_id>', methods=['POST'])
+@login_required
+def reject_friend_request(request_id):
+    friend_request = FriendRequest.query.get_or_404(request_id)
+    
+    if friend_request.receiver != current_user:
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    if friend_request.status != 'pending':
+        return jsonify({"error": "This request has already been processed"}), 400
+    
+    friend_request.status = 'rejected'
+    db.session.commit()
+    
+    return jsonify({"message": "Friend request rejected"}), 200
+
+@app.route('/friend_requests', methods=['GET'])
+@login_required
+def get_friend_requests():
+    pending_requests = FriendRequest.query.filter_by(receiver=current_user, status='pending').all()
+    requests_data = [{
+        'id': req.id,
+        'sender_username': req.sender.username,
+        'timestamp': req.timestamp
+    } for req in pending_requests]
+    return jsonify(requests_data), 200
+
+@app.route('/friends', methods=['GET'])
+@login_required
+def get_friends():
+    friends = current_user.friends.all()
+    friends_data = [{
+        'id': friend.id,
+        'username': friend.username,
+        'eth_address': friend.eth_address
+    } for friend in friends]
+    return jsonify(friends_data), 200
+
+@app.route('/friend_requests/<int:request_id>', methods=['DELETE'])
+@login_required
+def delete_friend_request(request_id):
+    friend_request = FriendRequest.query.get_or_404(request_id)
+    if friend_request.receiver != current_user:
+        return jsonify({"error": "Unauthorized access."}), 403
+
 @app.route('/activate/<token>', methods=['GET'])
 def activate(token):
     try:
@@ -201,7 +315,9 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html')
+    pending_requests = FriendRequest.query.filter_by(receiver = current_user, status = 'pending').all()
+    friends = current_user.friends.all()
+    return render_template('dashboard.html', pending_requests=pending_requests, friends=friends)
 
 @app.errorhandler(500)
 def internal_error(error):
@@ -211,6 +327,70 @@ def internal_error(error):
 def handle_exception(e):
     app.logger.error(f"Unhandled exception: {str(e)}")
     return jsonify({"error": "An unexpected error occurred. Please try again later."}), 500
+
+@app.route('/api/current_user', methods=['GET'])
+@login_required
+def get_current_user():
+    return jsonify({
+        'username': current_user.username,
+        'email': current_user.email
+    }), 200
+
+@app.route('/api/search_users', methods=['GET'])
+@login_required
+def search_users():
+    query = request.args.get('query', '')
+    if len(query) < 3:
+        return jsonify([])
+    
+    users = User.query.filter(User.username.ilike(f'%{query}%')).limit(10).all()
+    return jsonify([{'id': user.id, 'username': user.username} for user in users])
+
+@app.route('/api/send_friend_request', methods=['POST'])
+@login_required
+def api_send_friend_request():
+    data = request.json
+    receiver_id = data.get('receiver_id')
+    receiver = User.query.get(receiver_id)
+
+    if not receiver:
+        return jsonify({"error": "User not found."}), 404
+    if receiver == current_user:
+        return jsonify({"error": "You cannot send a friend request to yourself."}), 400
+
+    # Check if they are already friends
+    if receiver in current_user.friends:
+        return jsonify({"error": "You are already friends with this user."}), 400
+
+    existing_request = FriendRequest.query.filter(
+        ((FriendRequest.sender == current_user) & (FriendRequest.receiver == receiver)) |
+        ((FriendRequest.sender == receiver) & (FriendRequest.receiver == current_user)),
+        FriendRequest.status == 'pending'
+    ).first()
+
+    if existing_request:
+        if existing_request.sender == current_user:
+            return jsonify({"error": "Friend request already sent."}), 400
+        else:
+            return jsonify({"error": "This user has already sent you a friend request."}), 400
+
+    new_request = FriendRequest(sender=current_user, receiver=receiver)
+    db.session.add(new_request)
+    db.session.commit()
+
+    return jsonify({"message": "Friend request sent successfully."}), 200
+
+@app.route('/api/chats', methods=['GET'])
+@login_required
+def get_chats():
+    # Implement logic to fetch and return user's chats
+    # For now, you can return an empty list
+    return jsonify([])
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(app.root_path, 'static'),
+                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 if __name__ == '__main__':
     with app.app_context():
