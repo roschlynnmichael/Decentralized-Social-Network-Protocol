@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Socket event listeners
     socket.on('connect', () => {
         console.log('Connected to server');
-        fetchUserChats();
+        fetchFriends();
         loadFriendRequests();
         fetchUsername();
     });
@@ -36,6 +36,11 @@ document.addEventListener('DOMContentLoaded', function() {
             appendMessage(data.sender, data.content);
         }
         updateChatPreview(data.chat_id, data.content);
+    });
+
+    // Add this new socket event listener
+    socket.on('friend_request_accepted', (data) => {
+        addFriendToList(data);
     });
 
     // Event listeners
@@ -301,7 +306,9 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(data => {
             alert(data.message);
-            loadFriendRequests(); // Reload the friend requests instead of full page reload
+            loadFriendRequests(); // Reload the friend requests
+            // Remove this line as we'll update the friend list via WebSocket
+            // fetchFriends();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -319,7 +326,7 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(data => {
             alert(data.message);
-            loadFriendRequests(); // Reload the friend requests instead of full page reload
+            loadFriendRequests(); // Reload the friend requests
         })
         .catch(error => {
             console.error('Error:', error);
@@ -334,5 +341,46 @@ document.addEventListener('DOMContentLoaded', function() {
             usernameSpan.textContent = data.username;
         })
         .catch(error => console.error('Error fetching username:', error));
+    }
+
+    function fetchFriends() {
+        fetch('/api/friends')
+            .then(response => response.json())
+            .then(friends => {
+                chatList.innerHTML = '';
+                friends.forEach(friend => {
+                    addFriendToList(friend);
+                });
+            })
+            .catch(error => console.error('Error fetching friends:', error));
+    }
+
+    function addFriendToList(friend) {
+        const existingFriend = document.querySelector(`#chatList [data-friend-id="${friend.friend_id}"]`);
+        if (existingFriend) {
+            return; // Friend already in the list, no need to add again
+        }
+
+        const li = document.createElement('li');
+        li.className = 'nav-item';
+        li.innerHTML = `
+            <a class="nav-link d-flex align-items-center" href="#" data-friend-id="${friend.friend_id}">
+                <img src="/static/profile_pictures/${friend.friend_profile_picture}" alt="${friend.friend_username}" class="rounded-circle me-2" width="32" height="32">
+                <span class="flex-grow-1">${friend.friend_username}</span>
+            </a>
+        `;
+        li.querySelector('a').addEventListener('click', (e) => {
+            e.preventDefault();
+            openChat(friend.friend_id, friend.friend_username);
+        });
+        chatList.appendChild(li);
+    }
+
+    function openChat(friendId, friendName) {
+        currentChatId = friendId;
+        currentChatName.textContent = friendName;
+        chatArea.classList.remove('d-none');
+        messageArea.innerHTML = '';
+        fetchChatHistory(friendId);
     }
 });

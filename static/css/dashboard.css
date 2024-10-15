@@ -131,3 +131,18 @@ main {
 #profileDropdown:focus {
     box-shadow: none;
 }
+
+/* Add these styles to your existing CSS */
+
+#chatList .nav-link {
+    padding: 0.5rem 1rem;
+    border-radius: 0.25rem;
+}
+
+#chatList .nav-link:hover {
+    background-color: #f8f9fa;
+}
+
+#chatList .nav-link img {
+    object-fit: cover;
+}

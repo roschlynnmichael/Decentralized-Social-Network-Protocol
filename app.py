@@ -24,12 +24,12 @@ from werkzeug.utils import secure_filename
 
 load_dotenv()
 
-# SocketIO Setup
-socketio = SocketIO()
-
 # Flask Application Setup
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config.from_object('config.Config')
+
+# SocketIO Setup
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 mail = Mail(app)
 
@@ -220,6 +220,19 @@ def accept_friend_request(request_id):
     
     db.session.commit()
     
+    # Emit a socket event to notify the sender and receiver
+    friend = friend_request.sender
+    socketio.emit('friend_request_accepted', {
+        'friend_id': friend.id,
+        'friend_username': friend.username,
+        'friend_profile_picture': friend.profile_picture
+    }, room=current_user.id)
+    socketio.emit('friend_request_accepted', {
+        'friend_id': current_user.id,
+        'friend_username': current_user.username,
+        'friend_profile_picture': current_user.profile_picture
+    }, room=friend.id)
+
     return jsonify({"message": "Friend request accepted"}), 200
 
 @app.route('/reject_friend_request/<int:request_id>', methods=['POST'])
@@ -248,17 +261,6 @@ def get_friend_requests():
         'timestamp': req.timestamp
     } for req in pending_requests]
     return jsonify(requests_data), 200
-
-@app.route('/friends', methods=['GET'])
-@login_required
-def get_friends():
-    friends = current_user.friends.all()
-    friends_data = [{
-        'id': friend.id,
-        'username': friend.username,
-        'eth_address': friend.eth_address
-    } for friend in friends]
-    return jsonify(friends_data), 200
 
 @app.route('/friend_requests/<int:request_id>', methods=['DELETE'])
 @login_required
@@ -442,6 +444,23 @@ def remove_profile_picture():
 def get_profile_picture(user_id):
     user = User.query.get_or_404(user_id)
     return jsonify({"profile_picture": user.profile_picture}), 200
+
+@app.route('/api/friends', methods=['GET'])
+@login_required
+def get_friends():
+    friend_requests = FriendRequest.query.filter(
+        ((FriendRequest.sender_id == current_user.id) | (FriendRequest.receiver_id == current_user.id)) &
+        (FriendRequest.status == 'accepted')
+    ).all()
+    friends = []
+    for request in friend_requests:
+        friend = request.receiver if request.sender_id == current_user.id else request.sender
+        friends.append({
+            'friend_id': friend.id,
+            'friend_username': friend.username,
+            'friend_profile_picture': friend.profile_picture
+        })
+    return jsonify(friends)
 
 @app.route('/api/chats', methods=['GET'])
 @login_required
