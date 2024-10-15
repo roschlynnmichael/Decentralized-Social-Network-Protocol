@@ -118,3 +118,16 @@ main {
     font-size: 0.8rem;
     padding: 0.2rem 0.5rem;
 }
+
+.navbar-brand img {
+    object-fit: cover;
+}
+
+#profileDropdown {
+    padding: 0;
+    border: none;
+}
+
+#profileDropdown:focus {
+    box-shadow: none;
+}

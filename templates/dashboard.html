@@ -14,8 +14,20 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-light">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">Hello, <span id="username"></span></a>
+            <a class="navbar-brand" href="#">
+                <img src="{{ url_for('static', filename='profile_pictures/' + current_user.profile_picture) }}" alt="Profile" class="rounded-circle me-2" width="32" height="32" id="navProfilePic">
+                Hello, <span id="username"></span>
+            </a>
             <div class="d-flex align-items-center">
+                <div class="dropdown me-3">
+                    <button class="btn btn-link position-relative" type="button" id="profileDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                        <img src="{{ url_for('static', filename='profile_pictures/' + current_user.profile_picture) }}" alt="Profile" class="rounded-circle" width="32" height="32">
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="profileDropdown">
+                        <li><a class="dropdown-item" href="#" id="changeProfilePic">Change Profile Picture</a></li>
+                        <li><a class="dropdown-item" href="#" id="removeProfilePic">Remove Profile Picture</a></li>
+                    </ul>
+                </div>
                 <div class="dropdown me-3">
                     <button class="btn btn-link position-relative" type="button" id="notificationDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-bell"></i>
@@ -83,5 +95,29 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <!-- Custom JS -->
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+
+    <!-- Add this modal at the end of your body tag -->
+    <div class="modal fade" id="profilePicModal" tabindex="-1" aria-labelledby="profilePicModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="profilePicModalLabel">Change Profile Picture</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="profilePicForm">
+                        <div class="mb-3">
+                            <label for="profilePicInput" class="form-label">Select new profile picture</label>
+                            <input class="form-control" type="file" id="profilePicInput" accept="image/*">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="uploadProfilePic">Upload</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

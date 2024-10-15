@@ -15,6 +15,7 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(255), nullable=False)  # Increased length to 255
     eth_address = db.Column(db.String(42), unique=True, nullable=False)
     is_active = db.Column(db.Boolean, default=False)
+    profile_picture = db.Column(db.String(255), default='default.png', nullable=True)
 
     friends = db.relationship(
         'User',

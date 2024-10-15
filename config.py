@@ -26,3 +26,8 @@ class Config:
 
     #AWS EC2 Configuration
     EC2_PUBLIC_IP = '13.59.2.130'
+
+    #Upload Folder Configuration
+    UPLOAD_FOLDER = os.path.join('static', 'profile_pictures')
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024

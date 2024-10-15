@@ -13,6 +13,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const usernameSpan = document.getElementById('username');
     const noNotifications = document.getElementById('noNotifications');
     const friendSearchResults = document.getElementById('friendSearchResults');
+    const changeProfilePic = document.getElementById('changeProfilePic');
+    const removeProfilePic = document.getElementById('removeProfilePic');
+    const profilePicModal = new bootstrap.Modal(document.getElementById('profilePicModal'));
+    const profilePicForm = document.getElementById('profilePicForm');
+    const profilePicInput = document.getElementById('profilePicInput');
+    const uploadProfilePic = document.getElementById('uploadProfilePic');
+    const navProfilePic = document.getElementById('navProfilePic');
 
     let currentChatId = null;
 
@@ -47,6 +54,67 @@ document.addEventListener('DOMContentLoaded', function() {
     logoutBtn.addEventListener('click', () => {
         window.location.href = '/logout';
     });
+
+    changeProfilePic.addEventListener('click', () => {
+        profilePicModal.show();
+    });
+
+    removeProfilePic.addEventListener('click', () => {
+        if (confirm('Are you sure you want to remove your profile picture?')) {
+            fetch('/remove_profile_picture', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    alert(data.message);
+                    updateProfilePicture('default.png');
+                } else {
+                    alert(data.error || 'An error occurred while removing the profile picture');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while removing the profile picture');
+            });
+        }
+    });
+
+    uploadProfilePic.addEventListener('click', () => {
+        const file = profilePicInput.files[0];
+        if (file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload_profile_picture', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.filename) {
+                    updateProfilePicture(data.filename);
+                    profilePicModal.hide();
+                    alert('Profile picture updated successfully');
+                } else {
+                    alert(data.error || 'An error occurred while updating the profile picture');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while updating the profile picture');
+            });
+        } else {
+            alert('Please select a file first');
+        }
+    });
+
+    function updateProfilePicture(filename) {
+        const newProfilePicUrl = `/static/profile_pictures/${filename}`;
+        document.querySelectorAll('img[alt="Profile"]').forEach(img => {
+            img.src = newProfilePicUrl;
+        });
+    }
 
     // Helper functions
     function appendMessage(sender, message) {

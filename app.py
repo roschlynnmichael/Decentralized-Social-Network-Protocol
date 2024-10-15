@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from python_scripts.eth_account_maker.eth_account_generator import generate_eth_address
 from sqlalchemy_utils import database_exists, create_database
 from datetime import datetime
+from werkzeug.utils import secure_filename
 
 load_dotenv()
 
@@ -35,6 +36,11 @@ mail = Mail(app)
 # Login Manager Setup
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+# Get allowed extensions and upload folder from config
+def allowed_file(filename):
+    return '.' in filename and \
+        filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 # Configuration for mail server, serializer and SQLAlchemy
 db.init_app(app)
@@ -72,15 +78,16 @@ def generate_verification_code():
 def register():
     if request.method == 'GET':
         return render_template('register.html')
+    
     data = request.json
     username = data.get('username')
     email = data.get('email')
     password = data.get('password')
 
     if User.query.filter_by(username=username).first():
-        return jsonify({"Error": "Username already exists"}), 400
+        return jsonify({"error": "Username already exists"}), 400
     if User.query.filter_by(email=email).first():
-        return jsonify({"Error": "Email already exists"}), 400
+        return jsonify({"error": "Email already exists"}), 400
     
     # Generate Ethereum address
     eth_address, eth_private_key = generate_eth_address()
@@ -379,6 +386,62 @@ def api_send_friend_request():
     db.session.commit()
 
     return jsonify({"message": "Friend request sent successfully."}), 200
+
+@app.route('/upload_profile_picture', methods=['POST'])
+@login_required
+def upload_profile_picture():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    if file and allowed_file(file.filename):
+        try:
+            filename = secure_filename(file.filename)
+            file_extension = filename.rsplit('.', 1)[1].lower()
+            new_filename = f"user_{current_user.id}.{file_extension}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+            file.save(file_path)
+            
+            # Update user's profile picture in the database
+            current_user.profile_picture = new_filename
+            db.session.commit()
+            
+            return jsonify({
+                "message": "Profile picture updated successfully",
+                "filename": new_filename
+            }), 200
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Error uploading profile picture: {str(e)}")
+            return jsonify({"error": "An error occurred while uploading the profile picture"}), 500
+    
+    return jsonify({"error": "File type not allowed"}), 400
+
+@app.route('/remove_profile_picture', methods=['POST'])
+@login_required
+def remove_profile_picture():
+    try:
+        # Remove the current profile picture file
+        if current_user.profile_picture != 'default.png':
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], current_user.profile_picture)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        
+        # Set the user's profile picture to the default
+        current_user.profile_picture = 'default.png'
+        db.session.commit()
+        
+        return jsonify({"message": "Profile picture removed successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error removing profile picture: {str(e)}")
+        return jsonify({"error": "An error occurred while removing the profile picture"}), 500
+
+@app.route('/get_profile_picture/<int:user_id>')
+def get_profile_picture(user_id):
+    user = User.query.get_or_404(user_id)
+    return jsonify({"profile_picture": user.profile_picture}), 200
 
 @app.route('/api/chats', methods=['GET'])
 @login_required
