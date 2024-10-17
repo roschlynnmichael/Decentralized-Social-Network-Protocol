@@ -1,15 +1,43 @@
 import requests
 from requests.auth import HTTPBasicAuth
 import time
+import json
+from config import Config
 
 class IPFSHandler:
-    def __init__(self, max_retries=3):
-        self.max_retries = max_retries
-        self.ipfs_api_url = "http://13.59.2.130:8080/api/v0"
-        self.auth = HTTPBasicAuth('roschlynnmichael', 'Dsouza3191@')
-        self.session = requests.Session()
-        self.session.auth = self.auth
-        self.connect_to_ipfs()
+    def __init__(self):
+        self.ipfs_api_url = f'http://{Config.EC2_PUBLIC_IP}:8080/api/v0'
+        self.auth = (Config.NGINX_USERNAME, Config.NGINX_PASSWORD)
+
+    def add_content(self, content):
+        try:
+            files = {'file': ('filename', content)}
+            headers = {
+                'Host': Config.EC2_PUBLIC_IP,
+                'X-Real-IP': '127.0.0.1',
+                'X-Forwarded-For': '127.0.0.1',
+                'X-Forwarded-Proto': 'http'
+            }
+            response = requests.post(f'{self.ipfs_api_url}/add', files=files, auth=self.auth, headers=headers)
+            if response.status_code == 200:
+                result = json.loads(response.text)
+                return result['Hash']
+            else:
+                raise Exception(f"Failed to add content to IPFS. Status code: {response.status_code}, Response: {response.text}")
+        except Exception as e:
+            print(f"Error adding content to IPFS: {str(e)}")
+            raise
+
+    def get_content(self, ipfs_hash):
+        try:
+            response = requests.post(f'{self.ipfs_api_url}/cat?arg={ipfs_hash}', auth=self.auth)
+            if response.status_code == 200:
+                return response.content.decode('utf-8')
+            else:
+                raise Exception(f"Failed to get content from IPFS. Status code: {response.status_code}")
+        except Exception as e:
+            print(f"Error getting content from IPFS: {str(e)}")
+            raise
 
     def connect_to_ipfs(self):
         for attempt in range(self.max_retries):

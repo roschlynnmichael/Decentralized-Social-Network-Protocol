@@ -9,13 +9,16 @@ from werkzeug.security import generate_password_hash, check_password_hash
 db = SQLAlchemy()
 
 class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, nullable=False)
     username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)  # Increased length to 255
     eth_address = db.Column(db.String(42), unique=True, nullable=False)
     is_active = db.Column(db.Boolean, default=False)
     profile_picture = db.Column(db.String(255), default='default.png', nullable=True)
+    socket_host = db.Column(db.String(255), nullable=True)
+    socket_port = db.Column(db.Integer, nullable=True)
+    chat_history_hash = db.Column(db.String(255))
 
     friends = db.relationship(
         'User',

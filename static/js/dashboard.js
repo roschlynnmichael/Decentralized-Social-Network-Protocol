@@ -47,8 +47,9 @@ document.addEventListener('DOMContentLoaded', function() {
     messageForm.addEventListener('submit', (e) => {
         e.preventDefault();
         if (messageInput.value && currentChatId) {
-            sendMessage(currentChatId, messageInput.value);
-            messageInput.value = '';
+            window.sendMessage(currentChatId, messageInput.value);
+            // Remove this line, as we're clearing the input in the sendMessage function
+            // messageInput.value = '';
         }
     });
 
@@ -147,12 +148,9 @@ document.addEventListener('DOMContentLoaded', function() {
         chatList.appendChild(li);
     }
 
-    function openChat(chatId, name) {
-        currentChatId = chatId;
-        currentChatName.textContent = name;
-        chatArea.classList.remove('d-none');
-        messageArea.innerHTML = '';
-        fetchChatHistory(chatId);
+    function openChat(friendId, friendName) {
+        currentChatId = friendId;
+        startChat(friendId, friendName);  // This function is now in chat.js
     }
 
     function debounce(func, wait) {
@@ -186,25 +184,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 messageArea.innerHTML = '';
                 messages.forEach(msg => appendMessage(msg.sender, msg.content));
             });
-    }
-
-    function sendMessage(chatId, content) {
-        fetch('/api/send_message', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_id: chatId,
-                content: content
-            }),
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                appendMessage('You', content);
-            }
-        });
     }
 
     function updateChatPreview(chatId, lastMessage) {
@@ -378,9 +357,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function openChat(friendId, friendName) {
         currentChatId = friendId;
-        currentChatName.textContent = friendName;
-        chatArea.classList.remove('d-none');
-        messageArea.innerHTML = '';
-        fetchChatHistory(friendId);
+        startChat(friendId, friendName);  // This function is now in chat.js
     }
 });

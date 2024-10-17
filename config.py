@@ -26,7 +26,8 @@ class Config:
 
     #AWS EC2 Configuration
     EC2_PUBLIC_IP = '13.59.2.130'
-
+    NGINX_USERNAME = 'roschlynnmichael'
+    NGINX_PASSWORD = 'Dsouza3191@'
     #Upload Folder Configuration
     UPLOAD_FOLDER = os.path.join('static', 'profile_pictures')
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}

@@ -2,13 +2,16 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from python_scripts.sql_models.models import db, User, FriendRequest
+from python_scripts.handlers.p2p_socket_handler import P2PSocketHandler
+from python_scripts.handlers.message_handler import MessageHandler
+from python_scripts.handlers.ipfs_handler import IPFSHandler
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 import smtplib
 import random
 import string
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, send
 import requests
 import json
 import os
@@ -21,6 +24,7 @@ from python_scripts.eth_account_maker.eth_account_generator import generate_eth_
 from sqlalchemy_utils import database_exists, create_database
 from datetime import datetime
 from werkzeug.utils import secure_filename
+import logging
 
 load_dotenv()
 
@@ -29,9 +33,12 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config.from_object('config.Config')
 
 # SocketIO Setup
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False)
 
 mail = Mail(app)
+
+#IPFS Setup
+ipfs_handler = IPFSHandler()
 
 # Login Manager Setup
 login_manager = LoginManager(app)
@@ -311,9 +318,11 @@ def login():
 
     if not user.check_password(password):
         return jsonify({"error": "Incorrect password."}), 401
-
-    login_user(user)
-    return jsonify({"message": "Login successful!", "redirect": url_for('dashboard')}), 200
+    
+    if user and user.check_password(password):
+        login_user(user)
+        P2PSocketHandler.start_user_socket_server(user)
+        return jsonify({"message": "Login successful!", "redirect": url_for('dashboard')}), 200
 
 @app.route('/logout')
 @login_required
@@ -474,9 +483,156 @@ def favicon():
     return send_from_directory(os.path.join(app.root_path, 'static'),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
+@app.route('/api/get_friend_socket_info/<int:friend_id>')
+@login_required
+def get_friend_socket_info(friend_id):
+    friend = User.query.get_or_404(friend_id)
+    return jsonify({
+        'host': friend.socket_host,
+        'port': friend.socket_port
+    })
+
+@app.route('/api/chat_history/<int:friend_id>')
+@login_required
+def get_chat_history(friend_id):
+    try:
+        # Retrieve chat history from IPFS for both current user and friend
+        current_user_history = []
+        friend_history = []
+
+        if current_user.chat_history_hash:
+            current_user_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
+        
+        friend = User.query.get(friend_id)
+        if friend and friend.chat_history_hash:
+            friend_history = json.loads(ipfs_handler.get_content(friend.chat_history_hash))
+
+        # Combine and sort messages from both histories
+        combined_history = current_user_history + friend_history
+        combined_history = [msg for msg in combined_history if 
+                            (msg['sender_id'] == current_user.id and msg['friend_id'] == friend_id) or 
+                            (msg['sender_id'] == friend_id and msg['friend_id'] == current_user.id)]
+        
+        # Remove duplicates based on timestamp
+        seen = set()
+        deduplicated_history = []
+        for msg in combined_history:
+            if msg['timestamp'] not in seen:
+                seen.add(msg['timestamp'])
+                deduplicated_history.append(msg)
+
+        deduplicated_history.sort(key=lambda x: x['timestamp'])
+
+        return jsonify({
+            'messages': [{
+                'sender_id': msg['sender_id'],
+                'content': msg['content'],
+                'timestamp': msg['timestamp']
+            } for msg in deduplicated_history]
+        })
+    except Exception as e:
+        app.logger.error(f"Error retrieving chat history: {str(e)}")
+        return jsonify({"error": "An error occurred while retrieving chat history."}), 500
+
+@socketio.on('connect')
+def handle_connect():
+    app.logger.debug(f"Client connected: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    app.logger.debug(f"Client disconnected: {request.sid}")
+
+@socketio.on('join')
+def on_join(data):
+    room = data['room']
+    join_room(room)
+    app.logger.debug(f"User {current_user.id} joined room: {room}")
+
+@socketio.on('new_message')
+def handle_new_message(data):
+    room = data['room']
+    app.logger.debug(f"Received new_message event: {data}")
+    emit('new_message', data, room=room, include_self=False)
+    app.logger.debug(f"Emitted new_message event to room: {room}")
+
+@app.route('/api/send_message', methods=['POST'])
+@login_required
+def send_message():
+    data = request.json
+    friend_id = data.get('friend_id')
+    message_content = data.get('message')
+    room = data.get('room')
+    timestamp = data.get('timestamp')
+    
+    app.logger.debug(f"Received message: {data}")
+    
+    try:
+        # Retrieve current user's chat history
+        chat_history_hash = current_user.chat_history_hash
+        if chat_history_hash:
+            chat_history = json.loads(ipfs_handler.get_content(chat_history_hash))
+        else:
+            chat_history = []
+
+        # Add new message
+        new_message = {
+            'sender_id': current_user.id,
+            'friend_id': friend_id,
+            'content': message_content,
+            'timestamp': timestamp
+        }
+        chat_history.append(new_message)
+
+        # Store updated chat history in IPFS
+        updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
+
+        # Update current user's chat history hash
+        current_user.chat_history_hash = updated_history_hash
+
+        # Update friend's chat history
+        friend = User.query.get(friend_id)
+        friend_chat_history_hash = friend.chat_history_hash
+        if friend_chat_history_hash:
+            friend_chat_history = json.loads(ipfs_handler.get_content(friend_chat_history_hash))
+        else:
+            friend_chat_history = []
+        
+        friend_chat_history.append(new_message)
+        friend_updated_history_hash = ipfs_handler.add_content(json.dumps(friend_chat_history))
+        friend.chat_history_hash = friend_updated_history_hash
+
+        db.session.commit()
+
+        app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
+        socketio.emit('new_message', {
+            'sender_id': current_user.id,
+            'content': message_content,
+            'timestamp': timestamp,
+            'room': room
+        }, room=room, namespace='/')
+
+        return jsonify({"message": "Message sent successfully.", "ipfs_hash": updated_history_hash}), 200
+    except Exception as e:
+        app.logger.error(f"Error in send_message: {str(e)}")
+        return jsonify({"error": "An error occurred while sending the message."}), 500
+
+@app.route('/api/store_message', methods=['POST'])
+@login_required
+def store_message():
+    data = request.json
+    friend_id = data.get('friend_id')
+    message = data.get('message')
+    
+    # Store message in IPFS
+    ipfs_handler = IPFSHandler()
+    ipfs_hash = ipfs_handler.add_content(message)
+    
+    # Here you might want to store the IPFS hash in your database to keep track of the chat history
+    
+    return jsonify({'status': 'success', 'ipfs_hash': ipfs_hash})
+
 if __name__ == '__main__':
     with app.app_context():
         create_database_if_not_exists(app)
         db.create_all()
-    socketio.init_app(app)
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
