@@ -496,7 +496,6 @@ def get_friend_socket_info(friend_id):
 @login_required
 def get_chat_history(friend_id):
     try:
-        # Retrieve chat history from IPFS for both current user and friend
         current_user_history = []
         friend_history = []
 
@@ -507,28 +506,33 @@ def get_chat_history(friend_id):
         if friend and friend.chat_history_hash:
             friend_history = json.loads(ipfs_handler.get_content(friend.chat_history_hash))
 
-        # Combine and sort messages from both histories
+        # Combine histories and filter out cleared messages
         combined_history = current_user_history + friend_history
-        combined_history = [msg for msg in combined_history if 
-                            (msg['sender_id'] == current_user.id and msg['friend_id'] == friend_id) or 
-                            (msg['sender_id'] == friend_id and msg['friend_id'] == current_user.id)]
+        filtered_history = [
+            msg for msg in combined_history 
+            if ((msg['sender_id'] == current_user.id and msg['friend_id'] == friend_id) or 
+                (msg['sender_id'] == friend_id and msg['friend_id'] == current_user.id)) and
+               current_user.id not in msg.get('cleared_by', [])
+        ]
         
-        # Remove duplicates based on timestamp
+        # Remove duplicates
         seen = set()
-        deduplicated_history = []
-        for msg in combined_history:
-            if msg['timestamp'] not in seen:
-                seen.add(msg['timestamp'])
-                deduplicated_history.append(msg)
-
-        deduplicated_history.sort(key=lambda x: x['timestamp'])
+        unique_history = []
+        for msg in filtered_history:
+            msg_id = (msg['sender_id'], msg['timestamp'], msg['content'])
+            if msg_id not in seen:
+                seen.add(msg_id)
+                unique_history.append(msg)
+        
+        # Sort by timestamp
+        unique_history.sort(key=lambda x: x['timestamp'])
 
         return jsonify({
             'messages': [{
                 'sender_id': msg['sender_id'],
                 'content': msg['content'],
                 'timestamp': msg['timestamp']
-            } for msg in deduplicated_history]
+            } for msg in unique_history]
         })
     except Exception as e:
         app.logger.error(f"Error retrieving chat history: {str(e)}")
@@ -579,39 +583,51 @@ def send_message():
             'sender_id': current_user.id,
             'friend_id': friend_id,
             'content': message_content,
-            'timestamp': timestamp
-        }
-        chat_history.append(new_message)
-
-        # Store updated chat history in IPFS
-        updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
-
-        # Update current user's chat history hash
-        current_user.chat_history_hash = updated_history_hash
-
-        # Update friend's chat history
-        friend = User.query.get(friend_id)
-        friend_chat_history_hash = friend.chat_history_hash
-        if friend_chat_history_hash:
-            friend_chat_history = json.loads(ipfs_handler.get_content(friend_chat_history_hash))
-        else:
-            friend_chat_history = []
-        
-        friend_chat_history.append(new_message)
-        friend_updated_history_hash = ipfs_handler.add_content(json.dumps(friend_chat_history))
-        friend.chat_history_hash = friend_updated_history_hash
-
-        db.session.commit()
-
-        app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
-        socketio.emit('new_message', {
-            'sender_id': current_user.id,
-            'content': message_content,
             'timestamp': timestamp,
-            'room': room
-        }, room=room, namespace='/')
+            'cleared_by': []
+        }
 
-        return jsonify({"message": "Message sent successfully.", "ipfs_hash": updated_history_hash}), 200
+        # Check if the message already exists in the chat history
+        if not any(msg['sender_id'] == new_message['sender_id'] and 
+                   msg['timestamp'] == new_message['timestamp'] and 
+                   msg['content'] == new_message['content'] 
+                   for msg in chat_history):
+            chat_history.append(new_message)
+
+            # Store updated chat history in IPFS
+            updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
+
+            # Update current user's chat history hash
+            current_user.chat_history_hash = updated_history_hash
+
+            # Update friend's chat history
+            friend = User.query.get(friend_id)
+            friend_chat_history_hash = friend.chat_history_hash
+            if friend_chat_history_hash:
+                friend_chat_history = json.loads(ipfs_handler.get_content(friend_chat_history_hash))
+            else:
+                friend_chat_history = []
+            
+            # Check if the message already exists in the friend's chat history
+            if not any(msg['sender_id'] == new_message['sender_id'] and 
+                       msg['timestamp'] == new_message['timestamp'] and 
+                       msg['content'] == new_message['content'] 
+                       for msg in friend_chat_history):
+                friend_chat_history.append(new_message)
+                friend_updated_history_hash = ipfs_handler.add_content(json.dumps(friend_chat_history))
+                friend.chat_history_hash = friend_updated_history_hash
+
+            db.session.commit()
+
+            app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
+            socketio.emit('new_message', {
+                'sender_id': current_user.id,
+                'content': message_content,
+                'timestamp': timestamp,
+                'room': room
+            }, room=room, namespace='/')
+
+            return jsonify({"message": "Message sent successfully.", "ipfs_hash": updated_history_hash}), 200
     except Exception as e:
         app.logger.error(f"Error in send_message: {str(e)}")
         return jsonify({"error": "An error occurred while sending the message."}), 500
@@ -630,6 +646,41 @@ def store_message():
     # Here you might want to store the IPFS hash in your database to keep track of the chat history
     
     return jsonify({'status': 'success', 'ipfs_hash': ipfs_hash})
+
+@app.route('/api/clear_chat/<int:friend_id>', methods=['POST'])
+@login_required
+def clear_chat(friend_id):
+    try:
+        # Get the current user's chat history
+        if current_user.chat_history_hash:
+            current_user_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
+        else:
+            current_user_history = []
+
+        # Get the friend's chat history
+        friend = User.query.get(friend_id)
+        if friend and friend.chat_history_hash:
+            friend_history = json.loads(ipfs_handler.get_content(friend.chat_history_hash))
+        else:
+            friend_history = []
+
+        # Mark messages as cleared in both histories
+        for history in [current_user_history, friend_history]:
+            for msg in history:
+                if (msg['friend_id'] == friend_id and msg['sender_id'] == current_user.id) or \
+                   (msg['friend_id'] == current_user.id and msg['sender_id'] == friend_id):
+                    msg['cleared_by'] = list(set(msg.get('cleared_by', []) + [current_user.id]))
+
+        # Store the updated histories back to IPFS
+        current_user.chat_history_hash = ipfs_handler.add_content(json.dumps(current_user_history))
+        friend.chat_history_hash = ipfs_handler.add_content(json.dumps(friend_history))
+
+        db.session.commit()
+
+        return jsonify({"success": True, "message": "Chat history cleared successfully."}), 200
+    except Exception as e:
+        app.logger.error(f"Error clearing chat history: {str(e)}")
+        return jsonify({"success": False, "error": "An error occurred while clearing chat history."}), 500
 
 if __name__ == '__main__':
     with app.app_context():

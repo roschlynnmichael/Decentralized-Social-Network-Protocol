@@ -5,6 +5,30 @@ if (typeof currentUserId == 'undefined'){
     console.error('currentUserId is not defined. Make sure it is set in HTML before the script loads!');
 }
 
+// Add this near the top of the file, after the socket initialization
+document.getElementById('clearChatButton').addEventListener('click', clearChat);
+
+// Add this function to your chat.js file
+function clearChat() {
+    if (confirm('Are you sure you want to clear your chat history? This action cannot be undone and will only affect your view of the conversation.')) {
+        fetch(`/api/clear_chat/${currentChatFriendId}`, {
+            method: 'POST',
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('messageArea').innerHTML = '<p class="text-muted">No messages to display.</p>';
+                console.log('Chat history cleared successfully');
+            } else {
+                console.error('Failed to clear chat history:', data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error clearing chat history:', error);
+        });
+    }
+}
+
 function startChat(friendId, friendName) {
     currentChatFriendId = friendId;
     document.getElementById('currentChatName').textContent = `Chat with ${friendName}`;
@@ -30,6 +54,9 @@ function startChat(friendId, friendName) {
             console.log('Received message is not from current chat friend');
         }
     });
+
+    // Show the clear chat button when a chat is started
+    document.getElementById('clearChatButton').style.display = 'inline-block';
 }
 
 window.sendMessage = function(friendId, message) {
@@ -68,6 +95,7 @@ window.sendMessage = function(friendId, message) {
     });
 };
 
+// Modify the loadChatHistory function to handle potentially cleared chat history
 function loadChatHistory(friendId) {
     fetch(`/api/chat_history/${friendId}`)
     .then(response => response.json())
@@ -75,9 +103,13 @@ function loadChatHistory(friendId) {
         console.log('Received chat history:', data);
         const messageArea = document.getElementById('messageArea');
         messageArea.innerHTML = ''; // Clear existing messages
-        data.messages.forEach(msg => {
-            addMessageToChat(msg.sender_id, msg.content, new Date(msg.timestamp));
-        });
+        if (data.messages && data.messages.length > 0) {
+            data.messages.forEach(msg => {
+                addMessageToChat(msg.sender_id, msg.content, new Date(msg.timestamp));
+            });
+        } else {
+            messageArea.innerHTML = '<p class="text-muted">No messages to display.</p>';
+        }
         // Scroll to the bottom of the message area
         messageArea.scrollTop = messageArea.scrollHeight;
     })
@@ -118,4 +150,12 @@ function removeLastMessage() {
         messageArea.removeChild(messageArea.lastChild);
         console.log('Last message removed. Current message count:', messageArea.children.length);
     }
+}
+
+// Add this to hide the clear button when no chat is active
+function endChat() {
+    currentChatFriendId = null;
+    document.getElementById('currentChatName').textContent = '';
+    document.getElementById('chatArea').classList.add('d-none');
+    document.getElementById('clearChatButton').style.display = 'none';
 }
