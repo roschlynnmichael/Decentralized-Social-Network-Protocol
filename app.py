@@ -657,23 +657,15 @@ def clear_chat(friend_id):
         else:
             current_user_history = []
 
-        # Get the friend's chat history
-        friend = User.query.get(friend_id)
-        if friend and friend.chat_history_hash:
-            friend_history = json.loads(ipfs_handler.get_content(friend.chat_history_hash))
-        else:
-            friend_history = []
+        # Remove messages with the specific friend
+        current_user_history = [msg for msg in current_user_history 
+                                if not (msg['friend_id'] == friend_id or msg['sender_id'] == friend_id)]
 
-        # Mark messages as cleared in both histories
-        for history in [current_user_history, friend_history]:
-            for msg in history:
-                if (msg['friend_id'] == friend_id and msg['sender_id'] == current_user.id) or \
-                   (msg['friend_id'] == current_user.id and msg['sender_id'] == friend_id):
-                    msg['cleared_by'] = list(set(msg.get('cleared_by', []) + [current_user.id]))
+        # Store the updated history back to IPFS
+        new_history_hash = ipfs_handler.add_content(json.dumps(current_user_history))
 
-        # Store the updated histories back to IPFS
-        current_user.chat_history_hash = ipfs_handler.add_content(json.dumps(current_user_history))
-        friend.chat_history_hash = ipfs_handler.add_content(json.dumps(friend_history))
+        # Update the current user's chat history hash in the database
+        current_user.chat_history_hash = new_history_hash
 
         db.session.commit()
 
