@@ -35,3 +35,5 @@ class Config:
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
     MAX_CONTENT_LENGTH = 100 * 1024 * 1024
     
+    #FERNET KEY CONFIGURATION
+    ENCRYPTION_KEY = b'klMnjhfScy3lsuzmSu5yaxhzeortgmCOBI2XOdaullo='
