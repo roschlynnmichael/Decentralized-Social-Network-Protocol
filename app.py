@@ -40,6 +40,9 @@ mail = Mail(app)
 #IPFS Setup
 ipfs_handler = IPFSHandler()
 
+#Message Handler Setup
+message_handler = MessageHandler()
+
 # Login Manager Setup
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
@@ -527,12 +530,15 @@ def get_chat_history(friend_id):
         # Sort by timestamp
         unique_history.sort(key=lambda x: x['timestamp'])
 
+        # Decrypt messages
+        decrypted_history = [{
+            'sender_id': msg['sender_id'],
+            'content': message_handler.decrypt_message(msg['content']),
+            'timestamp': msg['timestamp']
+        } for msg in unique_history]
+
         return jsonify({
-            'messages': [{
-                'sender_id': msg['sender_id'],
-                'content': msg['content'],
-                'timestamp': msg['timestamp']
-            } for msg in unique_history]
+            'messages': decrypted_history
         })
     except Exception as e:
         app.logger.error(f"Error retrieving chat history: {str(e)}")
@@ -578,11 +584,14 @@ def send_message():
         else:
             chat_history = []
 
+        # Encrypt the message before storing
+        encrypted_message = message_handler.encrypt_message(message_content)
+
         # Add new message
         new_message = {
             'sender_id': current_user.id,
             'friend_id': friend_id,
-            'content': message_content,
+            'content': encrypted_message,
             'timestamp': timestamp,
             'cleared_by': []
         }
@@ -622,7 +631,7 @@ def send_message():
             app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
             socketio.emit('new_message', {
                 'sender_id': current_user.id,
-                'content': message_content,
+                'content': message_content,  # Send unencrypted message to the client
                 'timestamp': timestamp,
                 'room': room
             }, room=room, namespace='/')
