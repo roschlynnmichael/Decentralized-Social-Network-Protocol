@@ -6,6 +6,7 @@ from config import Config
 import json
 import hashlib
 from eth_account.messages import encode_defunct
+import time
 
 # Load environment variables
 load_dotenv()
@@ -100,22 +101,43 @@ class InfuraHandler:
     def get_chat_signature(self, chat_id):
         return self.chat_contract.functions.getChatSignature(chat_id).call()
 
-    def store_file_hash(self, file_hash, owner):
-        nonce = self.w3_http.eth.get_transaction_count(Config.ETHEREUM_ADDRESS)
-        tx = self.file_contract.functions.storeFileHash(file_hash, owner).build_transaction({
-            'from': Config.ETHEREUM_ADDRESS,
-            'nonce': nonce,
-            'gas': 200000,
-            'gasPrice': self.w3_http.eth.gas_price,
-        })
-        signed_tx = self.w3_http.eth.account.sign_transaction(tx, Config.ETHEREUM_PRIVATE_KEY)
-        
-        # Check if 'rawTransaction' exists, otherwise use 'raw_transaction'
-        raw_tx = signed_tx.rawTransaction if hasattr(signed_tx, 'rawTransaction') else signed_tx.raw_transaction
-        
-        tx_hash = self.w3_http.eth.send_raw_transaction(raw_tx)
-        tx_receipt = self.w3_http.eth.wait_for_transaction_receipt(tx_hash)
-        return tx_receipt
+    def estimate_gas(self, transaction):
+        return self.w3_http.eth.estimate_gas(transaction)
+
+    def store_file_hash(self, file_hash, owner, max_attempts=5):
+        for attempt in range(max_attempts):
+            try:
+                nonce = self.w3_http.eth.get_transaction_count(Config.ETHEREUM_ADDRESS)
+                gas_price = int(self.get_optimal_gas_price())  # Ensure gas_price is an integer
+
+                tx = self.file_contract.functions.storeFileHash(file_hash, owner).build_transaction({
+                    'from': Config.ETHEREUM_ADDRESS,
+                    'nonce': nonce,
+                    'gasPrice': gas_price,  # Use gasPrice instead of maxFeePerGas
+                    'gas': 200000,  # Set a fixed gas limit
+                })
+                
+                signed_tx = self.w3_http.eth.account.sign_transaction(tx, Config.ETHEREUM_PRIVATE_KEY)
+                tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.raw_transaction)
+                tx_receipt = self.w3_http.eth.wait_for_transaction_receipt(tx_hash)
+                
+                return tx_receipt
+            except Exception as e:
+                if attempt == max_attempts - 1:
+                    raise
+                time.sleep(2 ** attempt)  # Exponential backoff
 
     def get_file_owner(self, file_hash):
         return self.file_contract.functions.getFileOwner(file_hash).call()
+
+    def get_optimal_gas_price(self):
+        base_fee = self.w3_http.eth.get_block('latest').get('baseFeePerGas', 0)
+        max_priority_fee = self.w3_http.eth.max_priority_fee
+        if self.is_network_congested():
+            return int((base_fee * 2) + max_priority_fee)  # Ensure return value is an integer
+        return int(base_fee + max_priority_fee)  # Ensure return value is an integer
+
+    def is_network_congested(self):
+        latest_block = self.w3_http.eth.get_block('latest')
+        gas_used_ratio = latest_block['gasUsed'] / latest_block['gasLimit']
+        return gas_used_ratio > 0.8  # Consider network congested if gas usage is over 80%

@@ -1,5 +1,9 @@
+let socket;
+if (!socket) {
+    socket = io('/');
+}
+
 var currentChatFriendId = null;
-var socket = io('/');  // Connect to the default namespace
 
 if (typeof currentUserId == 'undefined'){
     console.error('currentUserId is not defined. Make sure it is set in HTML before the script loads!');
@@ -145,7 +149,11 @@ function startChat(friendId, friendName) {
 
     loadChatHistory(friendId);
 
-    socket.emit('join', { room: `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}` });
+    // Remove existing listeners before adding new ones
+    socket.off('new_message');
+
+    const room = `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}`;
+    socket.emit('join', { room: room });
 
     // Create a Set to store unique message identifiers
     const receivedMessages = new Set();
@@ -159,12 +167,8 @@ function startChat(friendId, friendName) {
         if (!receivedMessages.has(messageId)) {
             receivedMessages.add(messageId);
             
-            if (data.sender_id == friendId) {
-                addMessageToChat(data.sender_id, data.content, new Date(data.timestamp));
-                updateChatPreview(data.sender_id, data.content);
-            } else if (data.sender_id != currentUserId) {
-                console.log('Received message is not from current chat friend or current user');
-            }
+            addMessageToChat(data.sender_id, data.content, new Date(data.timestamp));
+            updateChatPreview(data.sender_id, data.content);
         } else {
             console.log('Duplicate message received, ignoring:', messageId);
         }
@@ -203,9 +207,6 @@ window.sendMessage = function(friendId, message) {
         document.getElementById('messageInput').value = '';
         if (data.error) {
             console.error('Error from server:', data.error);
-        } else {
-            // Add the message to the chat only after successful sending
-            addMessageToChat(currentUserId, message, new Date(timestamp));
         }
     })
     .catch(error => {
@@ -328,7 +329,7 @@ function showBlockchainStatus(message, alertClass) {
     messageElement.textContent = message;
     messageElement.className = `alert ${alertClass}`;
     modal.show();
-    setTimeout(() => modal.hide(), 3000); // Hide after 3 seconds
+    setTimeout(() => modal.hide(), 10000); // Show for 10 seconds
 }
 
 // Call this function immediately and then periodically
@@ -369,9 +370,24 @@ function showBlockchainStatus(message, alertClass) {
     messageElement.textContent = message;
     messageElement.className = `alert ${alertClass}`;
     modal.show();
-    setTimeout(() => modal.hide(), 3000); // Hide after 3 seconds
+    setTimeout(() => modal.hide(), 10000); // Show for 10 seconds
 }
 
 // Check status initially and then every 30 seconds, but only show changes
 checkBlockchainStatus();
-setInterval(checkBlockchainStatus, 30000);
+setInterval(checkBlockchainStatus, 14400000); // Check every 4 hours (14400000 ms)
+
+document.addEventListener('DOMContentLoaded', function() {
+    const messageForm = document.getElementById('messageForm');
+    if (messageForm) {
+        messageForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            if (message && currentChatFriendId) {
+                sendMessage(currentChatFriendId, message);
+                messageInput.value = '';
+            }
+        });
+    }
+});

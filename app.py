@@ -31,6 +31,7 @@ import tempfile
 from python_scripts.infura_configurator.infura_handler import InfuraHandler
 from web3 import Web3
 import hashlib
+import time
 
 load_dotenv()
 
@@ -716,7 +717,7 @@ def share_file():
                 "tx_hash": tx_receipt['transactionHash'].hex()
             }), 200
         except Exception as e:
-            app.logger.error(f"Error sharing file: {str(e)}")
+            app.logger.error(f"Error sharing file: {str(e)}", exc_info=True)
             return jsonify({"error": f"An error occurred while sharing the file: {str(e)}"}), 500
 
 @app.route('/api/download_file/<ipfs_hash>/<filename>', methods=['GET'])
