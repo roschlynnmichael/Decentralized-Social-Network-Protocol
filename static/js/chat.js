@@ -64,15 +64,10 @@ function shareFile(file) {
         method: 'POST',
         body: formData
     })
-    .then(response => {
-        if (!response.ok) {
-            return response.json().then(err => { throw err; });
-        }
-        return response.json();
-    })
+    .then(response => response.json())
     .then(data => {
         if (data.file_link) {
-            const message = `Shared file: [Download](${data.file_link})`;
+            const message = `Shared file: [Download](${data.file_link}) (Verified on blockchain: ${data.tx_hash})`;
             sendMessage(currentChatFriendId, message);
         } else {
             throw new Error('Unexpected response from server');
@@ -80,7 +75,23 @@ function shareFile(file) {
     })
     .catch(error => {
         console.error('Error sharing file:', error);
-        alert(error.error || 'An error occurred while sharing the file. Please try again.');
+        alert('An error occurred while sharing the file. Please try again.');
+    });
+}
+
+function verifyFile(ipfsHash) {
+    fetch(`/api/verify_file/${ipfsHash}`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.verified) {
+            alert(`File verified. Owner: ${data.owner}`);
+        } else {
+            alert('File verification failed.');
+        }
+    })
+    .catch(error => {
+        console.error('Error verifying file:', error);
+        alert('An error occurred while verifying the file.');
     });
 }
 
@@ -97,6 +108,18 @@ function renderMessage(senderId, content, timestamp) {
         const fileName = p1.split('/').pop();
         return `Shared file: <a href="${p1}" download="${fileName}" target="_blank">Download ${fileName}</a>`;
     });
+
+    // Check if the message is a shared file
+    const fileMatch = content.match(/Shared file: \[Download\]\((.*?)\) \(Verified on blockchain: (.*?)\)/);
+    if (fileMatch) {
+        const [_, fileLink, txHash] = fileMatch;
+        const ipfsHash = fileLink.split('/').slice(-2, -1)[0];
+        content = `
+            Shared file: <a href="${fileLink}" download target="_blank">Download</a>
+            <button onclick="verifyFile('${ipfsHash}')" class="btn btn-sm btn-outline-primary ml-2">Verify</button>
+            <small>(Tx: ${txHash})</small>
+        `;
+    }
 
     messageElement.innerHTML = `
         <strong>${senderLabel}</strong>: ${content}
@@ -260,3 +283,95 @@ function endChat() {
     document.getElementById('chatArea').classList.add('d-none');
     document.getElementById('clearChatButton').style.display = 'none';
 }
+
+document.getElementById('signChatButton').addEventListener('click', function() {
+    fetch(`/api/sign_chat/${currentChatFriendId}`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(`Chat signed. Signature: ${data.signature}`);
+    })
+    .catch(error => {
+        console.error('Error signing chat:', error);
+        alert('An error occurred while signing the chat.');
+    });
+});
+
+// Add this to your existing JavaScript
+function updateBlockchainStatus() {
+    fetch('/api/blockchain_status')
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+        return response.json();
+    })
+    .then(data => {
+        const statusMessage = data.connected 
+            ? `Connected to blockchain (Block: ${data.latest_block})`
+            : 'Disconnected from blockchain';
+        
+        const statusClass = data.connected ? 'alert-success' : 'alert-danger';
+        
+        showBlockchainStatus(statusMessage, statusClass);
+    })
+    .catch(error => {
+        console.error('Error fetching blockchain status:', error);
+        showBlockchainStatus('Error checking blockchain status', 'alert-warning');
+    });
+}
+
+function showBlockchainStatus(message, alertClass) {
+    const modal = new bootstrap.Modal(document.getElementById('blockchainStatusModal'));
+    const messageElement = document.getElementById('blockchainStatusMessage');
+    messageElement.textContent = message;
+    messageElement.className = `alert ${alertClass}`;
+    modal.show();
+    setTimeout(() => modal.hide(), 3000); // Hide after 3 seconds
+}
+
+// Call this function immediately and then periodically
+//updateBlockchainStatus();
+//setInterval(updateBlockchainStatus, 30000); // Update every 30 seconds
+
+let isConnectedToBlockchain = false;
+
+function checkBlockchainStatus() {
+    fetch('/api/blockchain_status')
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.connected && !isConnectedToBlockchain) {
+            showBlockchainStatus(`Connected to blockchain (Block: ${data.latest_block})`, 'alert-success');
+            isConnectedToBlockchain = true;
+        } else if (!data.connected && isConnectedToBlockchain) {
+            showBlockchainStatus('Disconnected from blockchain', 'alert-danger');
+            isConnectedToBlockchain = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching blockchain status:', error);
+        if (isConnectedToBlockchain) {
+            showBlockchainStatus('Error checking blockchain status', 'alert-warning');
+            isConnectedToBlockchain = false;
+        }
+    });
+}
+
+function showBlockchainStatus(message, alertClass) {
+    const modal = new bootstrap.Modal(document.getElementById('blockchainStatusModal'));
+    const messageElement = document.getElementById('blockchainStatusMessage');
+    messageElement.textContent = message;
+    messageElement.className = `alert ${alertClass}`;
+    modal.show();
+    setTimeout(() => modal.hide(), 3000); // Hide after 3 seconds
+}
+
+// Check status initially and then every 30 seconds, but only show changes
+checkBlockchainStatus();
+setInterval(checkBlockchainStatus, 30000);

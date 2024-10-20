@@ -6,6 +6,7 @@ from python_scripts.handlers.p2p_socket_handler import P2PSocketHandler
 from python_scripts.handlers.message_handler import MessageHandler
 from python_scripts.handlers.ipfs_handler import IPFSHandler
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from python_scripts.infura_configurator.infura_handler import InfuraHandler
 import smtplib
 import random
 import string
@@ -27,6 +28,9 @@ from datetime import datetime
 from werkzeug.utils import secure_filename
 import logging
 import tempfile
+from python_scripts.infura_configurator.infura_handler import InfuraHandler
+from web3 import Web3
+import hashlib
 
 load_dotenv()
 
@@ -48,6 +52,9 @@ message_handler = MessageHandler()
 # Login Manager Setup
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+#Infura Handler Setup
+infura_handler = InfuraHandler(app)
 
 # Get allowed extensions and upload folder from config
 def allowed_file(filename):
@@ -619,6 +626,12 @@ def send_message():
 
         db.session.commit()
 
+        # Sign the chat after every 100 messages
+        if len(chat_history) % 100 == 0:
+            chat_id = f"{current_user.id}_{friend_id}"
+            tx_hash = infura_handler.sign_chat(chat_id, chat_history)
+            app.logger.info(f"Chat signed. Transaction hash: {tx_hash}")
+
         app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
         socketio.emit('new_message', {
             'sender_id': current_user.id,
@@ -677,31 +690,34 @@ def clear_chat(friend_id):
 @app.route('/api/share_file', methods=['POST'])
 @login_required
 def share_file():
-    app.logger.debug(f"Received file. Content-Length: {request.content_length}")
-    try:
-        if 'file' not in request.files:
-            return jsonify({"error": "No file part"}), 400
-        file = request.files['file']
-        app.logger.debug(f"File name: {file.filename}, Size: {file.content_length}")
-        if file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
-        if file:
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            try:
-                with open(file_path, 'rb') as f:
-                    file_content = f.read()
-                encrypted_data = message_handler.encrypt_file(file_content)
-                ipfs_hash = ipfs_handler.add_content(encrypted_data)
-                file_link = f"/api/download_file/{ipfs_hash}/{filename}"
-                os.remove(file_path)
-                return jsonify({"message": "File shared successfully", "file_link": file_link}), 200
-            except Exception as e:
-                app.logger.error(f"Error sharing file: {str(e)}")
-                return jsonify({"error": f"An error occurred while sharing the file: {str(e)}"}), 500
-    except RequestEntityTooLarge:
-        return jsonify({"error": "File is too large. Maximum file size is 16 MB."}), 413
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    if file:
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(file_path)
+        try:
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+            encrypted_data = message_handler.encrypt_file(file_content)
+            ipfs_hash = ipfs_handler.add_content(encrypted_data)
+            
+            # Store file hash on blockchain
+            tx_receipt = infura_handler.store_file_hash(ipfs_hash, current_user.eth_address)
+            
+            file_link = f"/api/download_file/{ipfs_hash}/{filename}"
+            os.remove(file_path)
+            return jsonify({
+                "message": "File shared and verified on blockchain", 
+                "file_link": file_link, 
+                "tx_hash": tx_receipt['transactionHash'].hex()
+            }), 200
+        except Exception as e:
+            app.logger.error(f"Error sharing file: {str(e)}")
+            return jsonify({"error": f"An error occurred while sharing the file: {str(e)}"}), 500
 
 @app.route('/api/download_file/<ipfs_hash>/<filename>', methods=['GET'])
 @login_required
@@ -729,6 +745,63 @@ def download_file(ipfs_hash, filename):
                 os.unlink(temp_path)
             except Exception as e:
                 app.logger.error(f"Error removing temporary file: {str(e)}")
+
+@app.route('/api/sign_chat/<int:friend_id>', methods=['POST'])
+@login_required
+def sign_chat(friend_id):
+    chat_id = f"{current_user.id}_{friend_id}"
+    chat_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
+    chat_hash = hashlib.sha256(json.dumps(chat_history).encode()).hexdigest()
+    signature = infura_handler.sign_message(chat_hash)
+    return jsonify({"signature": signature}), 200
+
+@app.route('/api/verify_chat/<int:friend_id>', methods=['POST'])
+@login_required
+def verify_chat(friend_id):
+    data = request.json
+    chat_id = f"{current_user.id}_{friend_id}"
+    chat_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
+    chat_hash = hashlib.sha256(json.dumps(chat_history).encode()).hexdigest()
+    is_verified = infura_handler.verify_signature(chat_hash, data['signature'], current_user.eth_address)
+    return jsonify({"verified": is_verified}), 200
+
+@app.route('/api/send_eth', methods=['POST'])
+@login_required
+def send_eth():
+    data = request.json
+    to_address = data['to_address']
+    value = Web3.to_wei(data['amount'], 'ether')
+    tx_hash = infura_handler.send_transaction(to_address, value)
+    return jsonify({"transaction_hash": tx_hash}), 200
+
+@app.route('/api/verify_file/<ipfs_hash>', methods=['GET'])
+@login_required
+def verify_file(ipfs_hash):
+    try:
+        owner_address = infura_handler.get_file_owner(ipfs_hash)
+        is_verified = owner_address.lower() == current_user.eth_address.lower()
+        return jsonify({"verified": is_verified, "owner": owner_address}), 200
+    except Exception as e:
+        app.logger.error(f"Error verifying file: {str(e)}")
+        return jsonify({"error": f"An error occurred while verifying the file: {str(e)}"}), 500
+
+@app.route('/transaction_history')
+@login_required
+def transaction_history():
+    # Fetch transaction history from Infura
+    # This is a placeholder - you'll need to implement the actual fetching logic
+    transactions = infura_handler.get_transaction_history(current_user.eth_address)
+    return render_template('transaction_history.html', transactions=transactions)
+
+@app.route('/api/blockchain_status', methods=['GET'])
+def blockchain_status():
+    try:
+        # Check if we can connect to the Ethereum network
+        latest_block = infura_handler.w3_http.eth.get_block('latest')
+        return jsonify({"connected": True, "latest_block": latest_block.number}), 200
+    except Exception as e:
+        app.logger.error(f"Error checking blockchain status: {str(e)}")
+        return jsonify({"connected": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     with app.app_context():

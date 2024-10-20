@@ -20,9 +20,11 @@ class Config:
 
     #Infura Configuration
     INFURA_PROJECT_ID = 'df4d18360ebc45049c9bc3820d1f00cf'
-    INFURA_HTTP_ENDPOINT = f"https://mainnet.infura.io/v3/{INFURA_PROJECT_ID}"
-    INFURA_GAS_ENDPOINT = f"https://gas.api.infura.io/v3/{INFURA_PROJECT_ID}"
-    INFURA_WS_ENDPOINT = f"wss://mainnet.infura.io/ws/v3/{INFURA_PROJECT_ID}"
+    INFURA_HTTP_ENDPOINT = f"https://sepolia.infura.io/v3/{INFURA_PROJECT_ID}"
+    INFURA_WS_ENDPOINT = f"wss://sepolia.infura.io/ws/v3/{INFURA_PROJECT_ID}"
+    GAS_ENDPOINT = f"https://gas.api.infura.io/v3/{INFURA_PROJECT_ID}"
+    ETHEREUM_ADDRESS = '0x939283adDA5c1fD7f14222DFD39Ce907a522D7ff'
+    ETHEREUM_PRIVATE_KEY = '0xcb1c615b965bc0c247ec3d16aecb9512467352f9ed559b655019e612a24461e4'
 
     #AWS EC2 Configuration
     EC2_PUBLIC_IP = '13.59.2.130'
@@ -37,3 +39,95 @@ class Config:
     
     #FERNET KEY CONFIGURATION
     ENCRYPTION_KEY = b'klMnjhfScy3lsuzmSu5yaxhzeortgmCOBI2XOdaullo='
+
+    CHAT_CONTRACT_ADDRESS = '0x88EE9e049A78db3C4f43064748a568D28e9CE6C7'
+    FILE_CONTRACT_ADDRESS = '0xe89ef2ea1A042a6075D739886Db259135FaF618f'
+    
+    CHAT_CONTRACT_ABI = '''
+    [
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "chatId",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "chatHash",
+                    "type": "string"
+                },
+                {
+                    "internalType": "bytes",
+                    "name": "signature",
+                    "type": "bytes"
+                }
+            ],
+            "name": "storeChatSignature",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "chatId",
+                    "type": "string"
+                }
+            ],
+            "name": "getChatSignature",
+            "outputs": [
+                {
+                    "internalType": "bytes",
+                    "name": "",
+                    "type": "bytes"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]
+    '''
+    
+    FILE_CONTRACT_ABI = '''
+    [
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "fileHash",
+                    "type": "string"
+                },
+                {
+                    "internalType": "address",
+                    "name": "owner",
+                    "type": "address"
+                }
+            ],
+            "name": "storeFileHash",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "fileHash",
+                    "type": "string"
+                }
+            ],
+            "name": "getFileOwner",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]
+    '''
