@@ -4,10 +4,9 @@ from config import Config
 
 class MessageHandler:
     def __init__(self, key=None):
-        if key is None:
-            self.key = Fernet.generate_key()
-        else:
-            self.key = key if isinstance(key, bytes) else key.encode()
+        self.key = Config.ENCRYPTION_KEY
+        if not isinstance(self.key, bytes):
+            self.key = self.key.encode()
         self.fernet = Fernet(self.key)
 
     def encrypt_message(self, message):
