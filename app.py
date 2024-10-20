@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, send_file
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from python_scripts.sql_models.models import db, User, FriendRequest
@@ -11,6 +11,7 @@ import random
 import string
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.exceptions import RequestEntityTooLarge
 from flask_socketio import SocketIO, emit, join_room, send
 import requests
 import json
@@ -25,6 +26,7 @@ from sqlalchemy_utils import database_exists, create_database
 from datetime import datetime
 from werkzeug.utils import secure_filename
 import logging
+import tempfile
 
 load_dotenv()
 
@@ -690,6 +692,62 @@ def clear_chat(friend_id):
     except Exception as e:
         app.logger.error(f"Error clearing chat history: {str(e)}")
         return jsonify({"success": False, "error": "An error occurred while clearing chat history."}), 500
+
+@app.route('/api/share_file', methods=['POST'])
+@login_required
+def share_file():
+    app.logger.debug(f"Received file. Content-Length: {request.content_length}")
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file part"}), 400
+        file = request.files['file']
+        app.logger.debug(f"File name: {file.filename}, Size: {file.content_length}")
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+        if file:
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            try:
+                with open(file_path, 'rb') as f:
+                    file_content = f.read()
+                encrypted_data = message_handler.encrypt_file(file_content)
+                ipfs_hash = ipfs_handler.add_content(encrypted_data)
+                file_link = f"/api/download_file/{ipfs_hash}/{filename}"
+                os.remove(file_path)
+                return jsonify({"message": "File shared successfully", "file_link": file_link}), 200
+            except Exception as e:
+                app.logger.error(f"Error sharing file: {str(e)}")
+                return jsonify({"error": f"An error occurred while sharing the file: {str(e)}"}), 500
+    except RequestEntityTooLarge:
+        return jsonify({"error": "File is too large. Maximum file size is 16 MB."}), 413
+
+@app.route('/api/download_file/<ipfs_hash>/<filename>', methods=['GET'])
+@login_required
+def download_file(ipfs_hash, filename):
+    try:
+        encrypted_data = ipfs_handler.get_content(ipfs_hash)
+        decrypted_data = message_handler.decrypt_file(encrypted_data)
+        
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f'_{filename}') as temp_file:
+            temp_file.write(decrypted_data)
+            temp_path = temp_file.name
+
+        # Send the file
+        return send_file(temp_path, as_attachment=True, download_name=filename)
+
+    except Exception as e:
+        app.logger.error(f"Error downloading file: {str(e)}")
+        return jsonify({"error": f"An error occurred while downloading the file: {str(e)}"}), 500
+
+    finally:
+        # Clean up the temporary file
+        if 'temp_path' in locals():
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                app.logger.error(f"Error removing temporary file: {str(e)}")
 
 if __name__ == '__main__':
     with app.app_context():

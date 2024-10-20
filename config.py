@@ -28,7 +28,10 @@ class Config:
     EC2_PUBLIC_IP = '13.59.2.130'
     NGINX_USERNAME = 'roschlynnmichael'
     NGINX_PASSWORD = 'Dsouza3191@'
+    MAX_IPFS_LENGTH = 250 * 1024 * 1024
+
     #Upload Folder Configuration
     UPLOAD_FOLDER = os.path.join('static', 'profile_pictures')
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024
+    

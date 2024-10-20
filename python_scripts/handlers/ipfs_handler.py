@@ -18,7 +18,10 @@ class IPFSHandler:
                 'X-Forwarded-For': '127.0.0.1',
                 'X-Forwarded-Proto': 'http'
             }
+            print(f"Sending request to IPFS. Content length: {len(content)}")
             response = requests.post(f'{self.ipfs_api_url}/add', files=files, auth=self.auth, headers=headers)
+            print(f"IPFS response status: {response.status_code}")
+            print(f"IPFS response content: {response.text}")
             if response.status_code == 200:
                 result = json.loads(response.text)
                 return result['Hash']
@@ -32,7 +35,7 @@ class IPFSHandler:
         try:
             response = requests.post(f'{self.ipfs_api_url}/cat?arg={ipfs_hash}', auth=self.auth)
             if response.status_code == 200:
-                return response.content.decode('utf-8')
+                return response.content  # Return raw bytes instead of decoding
             else:
                 raise Exception(f"Failed to get content from IPFS. Status code: {response.status_code}")
         except Exception as e:
@@ -55,15 +58,9 @@ class IPFSHandler:
                     raise
 
     def add_file(self, file_path):
-        with open(file_path, 'rb') as file:
-            files = {'file': file}
-            response = self.session.post(f"{self.ipfs_api_url}/add", files=files)
-            response.raise_for_status()
-            return response.json()['Hash']
+        return self.add_content(file_path)
 
     def get_file(self, file_hash):
-        response = self.session.post(f"{self.ipfs_api_url}/cat", params={'arg': file_hash})
-        response.raise_for_status()
-        return response.content
+        return self.get_content(file_hash)
 
     # Add more methods as needed for your IPFS operations

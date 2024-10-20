@@ -150,7 +150,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function openChat(friendId, friendName) {
         currentChatId = friendId;
-        startChat(friendId, friendName);  // This function is now in chat.js
+        startChat(friendId, friendName);
+        const chatArea = document.getElementById('chatArea');
+        if (chatArea) {
+            chatArea.classList.remove('d-none');
+        }
     }
 
     function debounce(func, wait) {
@@ -357,6 +361,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function openChat(friendId, friendName) {
         currentChatId = friendId;
-        startChat(friendId, friendName);  // This function is now in chat.js
+        startChat(friendId, friendName);
+        const chatArea = document.getElementById('chatArea');
+        if (chatArea) {
+            chatArea.classList.remove('d-none');
+        }
     }
 });

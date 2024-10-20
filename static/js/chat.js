@@ -6,7 +6,12 @@ if (typeof currentUserId == 'undefined'){
 }
 
 // Add this near the top of the file, after the socket initialization
-document.getElementById('clearChatButton').addEventListener('click', clearChat);
+document.addEventListener('DOMContentLoaded', function() {
+    const clearChatButton = document.getElementById('clearChatButton');
+    if (clearChatButton) {
+        clearChatButton.addEventListener('click', clearChat);
+    }
+});
 
 // Add this function to your chat.js file
 function clearChat() {
@@ -29,25 +34,99 @@ function clearChat() {
     }
 }
 
+function setupFileSharing() {
+    const fileInput = document.getElementById('fileInput');
+    const shareFileBtn = document.getElementById('shareFileBtn');
+
+    shareFileBtn.addEventListener('click', () => {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            shareFile(file);
+        }
+    });
+}
+
+function shareFile(file) {
+    const maxSize = 100 * 1024 * 1024; // 100 MB
+    if (file.size > maxSize) {
+        alert(`File is too large. Maximum file size is ${maxSize / (1024 * 1024)} MB.`);
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/share_file', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw err; });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.file_link) {
+            const message = `Shared file: [Download](${data.file_link})`;
+            sendMessage(currentChatFriendId, message);
+        } else {
+            throw new Error('Unexpected response from server');
+        }
+    })
+    .catch(error => {
+        console.error('Error sharing file:', error);
+        alert(error.error || 'An error occurred while sharing the file. Please try again.');
+    });
+}
+
+function renderMessage(senderId, content, timestamp) {
+    const messageArea = document.getElementById('messageArea');
+    const messageElement = document.createElement('div');
+    messageElement.className = 'message';
+    
+    const senderLabel = senderId === currentUserId ? 'You' : 'Friend';
+    const localTimestamp = new Date(timestamp).toLocaleString();
+    
+    // Replace download links with actual clickable links
+    content = content.replace(/Shared file: \[Download\]\((.*?)\)/g, (match, p1) => {
+        const fileName = p1.split('/').pop();
+        return `Shared file: <a href="${p1}" download="${fileName}" target="_blank">Download ${fileName}</a>`;
+    });
+
+    messageElement.innerHTML = `
+        <strong>${senderLabel}</strong>: ${content}
+        <small class="text-muted">${localTimestamp}</small>
+    `;
+    messageArea.appendChild(messageElement);
+    messageArea.scrollTop = messageArea.scrollHeight;
+}
+
 function startChat(friendId, friendName) {
     currentChatFriendId = friendId;
-    document.getElementById('currentChatName').textContent = `Chat with ${friendName}`;
-    document.getElementById('chatArea').classList.remove('d-none');
+    console.log('Starting chat with friend:', friendId, friendName);
+
+    const currentChatNameElement = document.getElementById('currentChatName');
+    if (currentChatNameElement) {
+        currentChatNameElement.textContent = friendName;
+    }
+
+    const chatArea = document.getElementById('chatArea');
+    if (chatArea) {
+        chatArea.classList.remove('d-none');
+    }
+
     loadChatHistory(friendId);
 
-    // Join the chat room
-    const room = `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}`;
-    socket.emit('join', {room: room});
+    socket.emit('join', { room: `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}` });
 
-    // Remove any existing listener before adding a new one
-    socket.off('new_message');
-    
-    // Listen for new messages
-    socket.on('new_message', function(data) {
-        console.log('Received new message event:', data);
-        // Add the message if it's from the friend we're currently chatting with
-        if (data.sender_id == currentChatFriendId) {
-            console.log('Adding message from friend to chat');
+    socket.on('new_message', (data) => {
+        console.log('Received new message:', data);
+        if (data.sender_id == friendId) {
             addMessageToChat(data.sender_id, data.content, new Date(data.timestamp));
             updateChatPreview(data.sender_id, data.content);
         } else {
@@ -56,7 +135,12 @@ function startChat(friendId, friendName) {
     });
 
     // Show the clear chat button when a chat is started
-    document.getElementById('clearChatButton').style.display = 'inline-block';
+    const clearChatButton = document.getElementById('clearChatButton');
+    if (clearChatButton) {
+        clearChatButton.classList.remove('d-none');
+    }
+
+    setupFileSharing();
 }
 
 window.sendMessage = function(friendId, message) {
@@ -105,7 +189,7 @@ function loadChatHistory(friendId) {
         messageArea.innerHTML = ''; // Clear existing messages
         if (data.messages && data.messages.length > 0) {
             data.messages.forEach(msg => {
-                addMessageToChat(msg.sender_id, msg.content, new Date(msg.timestamp));
+                renderMessage(msg.sender_id, msg.content, msg.timestamp);
             });
         } else {
             messageArea.innerHTML = '<p class="text-muted">No messages to display.</p>';
@@ -125,8 +209,14 @@ function addMessageToChat(senderId, content, timestamp) {
     const senderLabel = Number(senderId) === Number(currentUserId) ? 'You' : 'Friend';
     
     // Convert timestamp to local time
-    const localTimestamp = timestamp.toLocaleString();
+    const localTimestamp = new Date(timestamp).toLocaleString();
     
+    // Replace download links with actual clickable links
+    content = content.replace(/Shared file: \[Download\]\((.*?)\)/g, (match, p1) => {
+        const fileName = p1.split('/').pop();
+        return `Shared file: <a href="${p1}" download="${fileName}">Download ${fileName}</a>`;
+    });
+
     messageElement.innerHTML = `
         <strong>${senderLabel}</strong>: ${content}
         <small class="text-muted">${localTimestamp}</small>
