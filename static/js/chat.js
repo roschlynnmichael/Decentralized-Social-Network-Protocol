@@ -124,13 +124,26 @@ function startChat(friendId, friendName) {
 
     socket.emit('join', { room: `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}` });
 
+    // Create a Set to store unique message identifiers
+    const receivedMessages = new Set();
+
     socket.on('new_message', (data) => {
         console.log('Received new message:', data);
-        if (data.sender_id == friendId) {
-            addMessageToChat(data.sender_id, data.content, new Date(data.timestamp));
-            updateChatPreview(data.sender_id, data.content);
+        // Create a unique identifier for the message
+        const messageId = `${data.sender_id}-${data.timestamp}`;
+        
+        // Check if we've already processed this message
+        if (!receivedMessages.has(messageId)) {
+            receivedMessages.add(messageId);
+            
+            if (data.sender_id == friendId) {
+                addMessageToChat(data.sender_id, data.content, new Date(data.timestamp));
+                updateChatPreview(data.sender_id, data.content);
+            } else if (data.sender_id != currentUserId) {
+                console.log('Received message is not from current chat friend or current user');
+            }
         } else {
-            console.log('Received message is not from current chat friend');
+            console.log('Duplicate message received, ignoring:', messageId);
         }
     });
 
@@ -148,9 +161,6 @@ window.sendMessage = function(friendId, message) {
     const timestamp = new Date().toISOString();
     
     console.log('Sending message:', { friendId, message, room, timestamp });
-
-    // Add the message to the chat immediately for the sender
-    addMessageToChat(currentUserId, message, new Date(timestamp));
 
     fetch('/api/send_message', {
         method: 'POST',
@@ -170,12 +180,13 @@ window.sendMessage = function(friendId, message) {
         document.getElementById('messageInput').value = '';
         if (data.error) {
             console.error('Error from server:', data.error);
-            removeLastMessage();
+        } else {
+            // Add the message to the chat only after successful sending
+            addMessageToChat(currentUserId, message, new Date(timestamp));
         }
     })
     .catch(error => {
         console.error('Error sending message:', error);
-        removeLastMessage();
     });
 };
 
