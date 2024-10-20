@@ -501,49 +501,38 @@ def get_friend_socket_info(friend_id):
 @login_required
 def get_chat_history(friend_id):
     try:
-        current_user_history = []
-        friend_history = []
+        chat_history_hash = current_user.chat_history_hash
+        if not chat_history_hash:
+            return jsonify({'messages': []}), 200
 
-        if current_user.chat_history_hash:
-            current_user_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
-        
-        friend = User.query.get(friend_id)
-        if friend and friend.chat_history_hash:
-            friend_history = json.loads(ipfs_handler.get_content(friend.chat_history_hash))
+        encrypted_history = ipfs_handler.get_content(chat_history_hash)
+        if not encrypted_history:
+            return jsonify({'messages': []}), 200
 
-        # Combine histories and filter out cleared messages
-        combined_history = current_user_history + friend_history
+        try:
+            chat_history = json.loads(encrypted_history)
+        except json.JSONDecodeError:
+            app.logger.error(f"Invalid JSON in chat history for user {current_user.id}")
+            return jsonify({'messages': [], 'error': 'Invalid chat history format'}), 200
+
+        # Filter messages for the specific friend
         filtered_history = [
-            msg for msg in combined_history 
-            if ((msg['sender_id'] == current_user.id and msg['friend_id'] == friend_id) or 
-                (msg['sender_id'] == friend_id and msg['friend_id'] == current_user.id)) and
-               current_user.id not in msg.get('cleared_by', [])
+            msg for msg in chat_history 
+            if (msg['sender_id'] == current_user.id and msg['friend_id'] == friend_id) or 
+               (msg['sender_id'] == friend_id and msg['friend_id'] == current_user.id)
         ]
-        
-        # Remove duplicates
-        seen = set()
-        unique_history = []
+
+        # Decrypt message content
         for msg in filtered_history:
-            msg_id = (msg['sender_id'], msg['timestamp'], msg['content'])
-            if msg_id not in seen:
-                seen.add(msg_id)
-                unique_history.append(msg)
-        
-        # Sort by timestamp
-        unique_history.sort(key=lambda x: x['timestamp'])
+            try:
+                msg['content'] = message_handler.decrypt_message(msg['content'])
+            except Exception as e:
+                app.logger.error(f"Error decrypting message: {str(e)}")
+                msg['content'] = "Error: Could not decrypt message"
 
-        # Decrypt messages
-        decrypted_history = [{
-            'sender_id': msg['sender_id'],
-            'content': message_handler.decrypt_message(msg['content']),
-            'timestamp': msg['timestamp']
-        } for msg in unique_history]
-
-        return jsonify({
-            'messages': decrypted_history
-        })
+        return jsonify({'messages': filtered_history}), 200
     except Exception as e:
-        app.logger.error(f"Error retrieving chat history: {str(e)}")
+        app.logger.error(f"Error retrieving chat history: {str(e)}", exc_info=True)
         return jsonify({"error": "An error occurred while retrieving chat history."}), 500
 
 @socketio.on('connect')
@@ -582,7 +571,12 @@ def send_message():
         # Retrieve current user's chat history
         chat_history_hash = current_user.chat_history_hash
         if chat_history_hash:
-            chat_history = json.loads(ipfs_handler.get_content(chat_history_hash))
+            encrypted_history = ipfs_handler.get_content(chat_history_hash)
+            try:
+                chat_history = json.loads(encrypted_history)
+            except json.JSONDecodeError:
+                app.logger.error(f"Invalid JSON in chat history for user {current_user.id}")
+                chat_history = []
         else:
             chat_history = []
 
@@ -598,49 +592,44 @@ def send_message():
             'cleared_by': []
         }
 
-        # Check if the message already exists in the chat history
-        if not any(msg['sender_id'] == new_message['sender_id'] and 
-                   msg['timestamp'] == new_message['timestamp'] and 
-                   msg['content'] == new_message['content'] 
-                   for msg in chat_history):
-            chat_history.append(new_message)
+        chat_history.append(new_message)
 
-            # Store updated chat history in IPFS
-            updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
+        # Store updated chat history in IPFS
+        updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
 
-            # Update current user's chat history hash
-            current_user.chat_history_hash = updated_history_hash
+        # Update current user's chat history hash
+        current_user.chat_history_hash = updated_history_hash
 
-            # Update friend's chat history
-            friend = User.query.get(friend_id)
-            friend_chat_history_hash = friend.chat_history_hash
-            if friend_chat_history_hash:
-                friend_chat_history = json.loads(ipfs_handler.get_content(friend_chat_history_hash))
-            else:
+        # Update friend's chat history
+        friend = User.query.get(friend_id)
+        friend_chat_history_hash = friend.chat_history_hash
+        if friend_chat_history_hash:
+            friend_encrypted_history = ipfs_handler.get_content(friend_chat_history_hash)
+            try:
+                friend_chat_history = json.loads(friend_encrypted_history)
+            except json.JSONDecodeError:
+                app.logger.error(f"Invalid JSON in chat history for user {friend_id}")
                 friend_chat_history = []
-            
-            # Check if the message already exists in the friend's chat history
-            if not any(msg['sender_id'] == new_message['sender_id'] and 
-                       msg['timestamp'] == new_message['timestamp'] and 
-                       msg['content'] == new_message['content'] 
-                       for msg in friend_chat_history):
-                friend_chat_history.append(new_message)
-                friend_updated_history_hash = ipfs_handler.add_content(json.dumps(friend_chat_history))
-                friend.chat_history_hash = friend_updated_history_hash
+        else:
+            friend_chat_history = []
+        
+        friend_chat_history.append(new_message)
+        friend_updated_history_hash = ipfs_handler.add_content(json.dumps(friend_chat_history))
+        friend.chat_history_hash = friend_updated_history_hash
 
-            db.session.commit()
+        db.session.commit()
 
-            app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
-            socketio.emit('new_message', {
-                'sender_id': current_user.id,
-                'content': message_content,  # Send unencrypted message to the client
-                'timestamp': timestamp,
-                'room': room
-            }, room=room, namespace='/')
+        app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
+        socketio.emit('new_message', {
+            'sender_id': current_user.id,
+            'content': message_content,  # Send unencrypted message to the client
+            'timestamp': timestamp,
+            'room': room
+        }, room=room, namespace='/')
 
-            return jsonify({"message": "Message sent successfully.", "ipfs_hash": updated_history_hash}), 200
+        return jsonify({"message": "Message sent successfully.", "ipfs_hash": updated_history_hash}), 200
     except Exception as e:
-        app.logger.error(f"Error in send_message: {str(e)}")
+        app.logger.error(f"Error in send_message: {str(e)}", exc_info=True)
         return jsonify({"error": "An error occurred while sending the message."}), 500
 
 @app.route('/api/store_message', methods=['POST'])
