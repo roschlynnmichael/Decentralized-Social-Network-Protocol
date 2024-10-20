@@ -79,7 +79,7 @@ class InfuraHandler:
             'data': data
         }
         signed_txn = self.w3_http.eth.account.sign_transaction(transaction, Config.ETHEREUM_PRIVATE_KEY)
-        tx_hash = self.w3_http.eth.send_raw_transaction(signed_txn.rawTransaction)
+        tx_hash = self.w3_http.eth.send_raw_transaction(signed_txn.raw_transaction)
         return tx_hash.hex()
 
     def get_transaction_receipt(self, tx_hash):
@@ -108,27 +108,42 @@ class InfuraHandler:
         for attempt in range(max_attempts):
             try:
                 nonce = self.w3_http.eth.get_transaction_count(Config.ETHEREUM_ADDRESS)
-                gas_price = int(self.get_optimal_gas_price())  # Ensure gas_price is an integer
+                gas_price = self.w3_http.eth.gas_price
+                
+                # Estimate gas
+                gas_estimate = self.file_contract.functions.storeFileHash(file_hash, owner).estimate_gas({
+                    'from': Config.ETHEREUM_ADDRESS,
+                    'nonce': nonce,
+                    'gasPrice': gas_price,
+                })
+                
+                # Add some buffer to the gas estimate
+                gas_limit = int(gas_estimate * 1.2)
 
                 tx = self.file_contract.functions.storeFileHash(file_hash, owner).build_transaction({
                     'from': Config.ETHEREUM_ADDRESS,
                     'nonce': nonce,
-                    'gasPrice': gas_price,  # Use gasPrice instead of maxFeePerGas
-                    'gas': 200000,  # Set a fixed gas limit
+                    'gasPrice': gas_price,
+                    'gas': gas_limit,
                 })
                 
                 signed_tx = self.w3_http.eth.account.sign_transaction(tx, Config.ETHEREUM_PRIVATE_KEY)
                 tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.raw_transaction)
-                tx_receipt = self.w3_http.eth.wait_for_transaction_receipt(tx_hash)
+                tx_receipt = self.w3_http.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
                 
                 return tx_receipt
             except Exception as e:
+                print(f"Attempt {attempt + 1} failed: {str(e)}")
                 if attempt == max_attempts - 1:
                     raise
                 time.sleep(2 ** attempt)  # Exponential backoff
 
     def get_file_owner(self, file_hash):
-        return self.file_contract.functions.getFileOwner(file_hash).call()
+        try:
+            return self.file_contract.functions.getFileOwner(file_hash).call()
+        except Exception as e:
+            print(f"Error getting file owner: {str(e)}")
+            return None
 
     def get_optimal_gas_price(self):
         base_fee = self.w3_http.eth.get_block('latest').get('baseFeePerGas', 0)
