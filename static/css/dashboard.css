@@ -146,3 +146,49 @@ main {
 #chatList .nav-link img {
     object-fit: cover;
 }
+
+.message {
+    margin-bottom: 15px;
+    padding: 10px;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+}
+
+.message-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.message-content {
+    word-break: break-word;
+}
+
+.file-message {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background-color: #e9ecef;
+    border-radius: 4px;
+}
+
+.file-message i {
+    color: #6c757d;
+}
+
+.file-message a {
+    color: #0d6efd;
+    text-decoration: none;
+}
+
+.file-message a:hover {
+    text-decoration: underline;
+}
+
+.message .text-muted {
+    font-size: 0.8rem;
+}

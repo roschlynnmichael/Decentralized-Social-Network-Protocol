@@ -691,34 +691,41 @@ def clear_chat(friend_id):
 @app.route('/api/share_file', methods=['POST'])
 @login_required
 def share_file():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-    if file:
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
-        try:
-            with open(file_path, 'rb') as f:
-                file_content = f.read()
-            encrypted_data = message_handler.encrypt_file(file_content)
-            ipfs_hash = ipfs_handler.add_content(encrypted_data)
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+
+        if file and allowed_file(file.filename):
+            # Process and store file
+            filename = secure_filename(file.filename)
+            file_content = file.read()
             
-            # Store file hash on blockchain
-            tx_receipt = infura_handler.store_file_hash(ipfs_hash, current_user.eth_address)
+            # Encrypt file content
+            encrypted_content = message_handler.encrypt_file(file_content)
             
-            file_link = f"/api/download_file/{ipfs_hash}/{filename}"
-            os.remove(file_path)
+            # Store in IPFS
+            ipfs_hash = ipfs_handler.add_content(encrypted_content)
+            
+            # Create file message structure
+            file_data = {
+                'filename': filename,
+                'ipfs_hash': ipfs_hash,
+                'type': 'file'
+            }
+            
             return jsonify({
-                "message": "File shared and verified on blockchain", 
-                "file_link": file_link, 
-                "tx_hash": tx_receipt['transactionHash'].hex()
-            }), 200
-        except Exception as e:
-            app.logger.error(f"Error sharing file: {str(e)}", exc_info=True)
-            return jsonify({"error": f"An error occurred while sharing the file: {str(e)}"}), 500
+                'success': True,
+                'file_link': f'/download/{ipfs_hash}/{filename}',
+                'file_data': file_data
+            })
+
+    except Exception as e:
+        app.logger.error(f"Error sharing file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/download_file/<ipfs_hash>/<filename>', methods=['GET'])
 @login_required

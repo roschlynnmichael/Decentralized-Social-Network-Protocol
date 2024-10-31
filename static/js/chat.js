@@ -104,31 +104,50 @@ function renderMessage(senderId, content, timestamp) {
     const messageElement = document.createElement('div');
     messageElement.className = 'message';
     
-    const senderLabel = senderId === currentUserId ? 'You' : 'Friend';
+    // Determine if the message is from the current user
+    const senderLabel = Number(senderId) === Number(currentUserId) ? 'You' : 'Friend';
     const localTimestamp = new Date(timestamp).toLocaleString();
     
-    // Replace download links with actual clickable links
-    content = content.replace(/Shared file: \[Download\]\((.*?)\)/g, (match, p1) => {
-        const fileName = p1.split('/').pop();
-        return `Shared file: <a href="${p1}" download="${fileName}" target="_blank">Download ${fileName}</a>`;
-    });
+    // Parse the decrypted content
+    let messageContent = '';
+    let messageType = 'text';
+    
+    if (typeof content === 'object') {
+        messageType = content.type || 'text';
+        messageContent = content.content;
+    } else {
+        messageContent = content;
+    }
 
-    // Check if the message is a shared file
-    const fileMatch = content.match(/Shared file: \[Download\]\((.*?)\) \(Verified on blockchain: (.*?)\)/);
-    if (fileMatch) {
-        const [_, fileLink, txHash] = fileMatch;
-        const ipfsHash = fileLink.split('/').slice(-2, -1)[0];
-        content = `
-            Shared file: <a href="${fileLink}" download target="_blank">Download</a>
-            <button onclick="verifyFile('${ipfsHash}')" class="btn btn-sm btn-outline-primary ml-2">Verify</button>
-            <small>(Tx: ${txHash})</small>
+    // Create message header
+    let headerHTML = `
+        <div class="message-header">
+            <strong>${senderLabel}</strong>
+            <small class="text-muted">${localTimestamp}</small>
+        </div>
+    `;
+
+    // Create message content based on type
+    let contentHTML = '';
+    if (messageType === 'file') {
+        const fileName = messageContent.filename || messageContent.split('/').pop();
+        contentHTML = `
+            <div class="message-content file-message">
+                <i class="fas fa-file"></i>
+                <a href="${messageContent}" download="${fileName}" target="_blank">
+                    Download ${fileName}
+                </a>
+            </div>
+        `;
+    } else {
+        contentHTML = `
+            <div class="message-content">
+                ${messageContent}
+            </div>
         `;
     }
 
-    messageElement.innerHTML = `
-        <strong>${senderLabel}</strong>: ${content}
-        <small class="text-muted">${localTimestamp}</small>
-    `;
+    messageElement.innerHTML = headerHTML + contentHTML;
     messageArea.appendChild(messageElement);
     messageArea.scrollTop = messageArea.scrollHeight;
 }
