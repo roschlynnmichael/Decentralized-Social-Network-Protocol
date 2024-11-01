@@ -38,28 +38,46 @@ function clearChat() {
     }
 }
 
+let isUploading = false;
+
 function setupFileSharing() {
     const fileInput = document.getElementById('fileInput');
     const shareFileBtn = document.getElementById('shareFileBtn');
 
-    shareFileBtn.addEventListener('click', () => {
-        fileInput.click();
-    });
+    // Remove any existing event listeners
+    shareFileBtn.removeEventListener('click', handleShareButtonClick);
+    fileInput.removeEventListener('change', handleFileSelection);
 
-    fileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (file) {
-            shareFile(file);
-        }
-    });
+    // Add new event listeners
+    shareFileBtn.addEventListener('click', handleShareButtonClick);
+    fileInput.addEventListener('change', handleFileSelection);
+}
+
+function handleShareButtonClick(event) {
+    event.preventDefault();
+    const fileInput = document.getElementById('fileInput');
+    fileInput.click();
+}
+
+function handleFileSelection(event) {
+    const file = event.target.files[0];
+    if (file && !isUploading) {
+        shareFile(file);
+    }
 }
 
 function shareFile(file) {
+    if (isUploading) return;
+
     const maxSize = 100 * 1024 * 1024; // 100 MB
     if (file.size > maxSize) {
         alert(`File is too large. Maximum file size is ${maxSize / (1024 * 1024)} MB.`);
         return;
     }
+
+    isUploading = true;
+    const shareFileBtn = document.getElementById('shareFileBtn');
+    shareFileBtn.disabled = true;
 
     const formData = new FormData();
     formData.append('file', file);
@@ -70,16 +88,25 @@ function shareFile(file) {
     })
     .then(response => response.json())
     .then(data => {
-        if (data.file_link) {
-            const message = `Shared file: [Download](${data.file_link}) (Verified on blockchain: ${data.tx_hash})`;
+        if (data.success) {
+            const txHashInfo = data.tx_hash ? 
+                `(Verified on blockchain: ${data.tx_hash})` : 
+                '(Blockchain verification pending...)';
+            
+            const message = `Shared file: [Download](${data.file_link}) ${txHashInfo}`;
             sendMessage(currentChatFriendId, message);
+            document.getElementById('fileInput').value = '';
         } else {
-            throw new Error('Unexpected response from server');
+            throw new Error(data.error || 'Unexpected response from server');
         }
     })
     .catch(error => {
         console.error('Error sharing file:', error);
         alert('An error occurred while sharing the file. Please try again.');
+    })
+    .finally(() => {
+        isUploading = false;
+        shareFileBtn.disabled = false;
     });
 }
 
@@ -106,7 +133,7 @@ function renderMessage(senderId, content, timestamp) {
     
     // Determine if the message is from the current user
     const senderLabel = Number(senderId) === Number(currentUserId) ? 'You' : 'Friend';
-    const localTimestamp = new Date(timestamp).toLocaleString();
+    const localtimestamp = new Date(timestamp).toLocaleString();
     
     // Parse the decrypted content
     let messageContent = '';
@@ -123,7 +150,7 @@ function renderMessage(senderId, content, timestamp) {
     let headerHTML = `
         <div class="message-header">
             <strong>${senderLabel}</strong>
-            <small class="text-muted">${localTimestamp}</small>
+            <small class="text-muted">${localtimestamp}</small>
         </div>
     `;
 
@@ -409,4 +436,5 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    setupFileSharing();
 });

@@ -59,8 +59,16 @@ infura_handler = InfuraHandler(app)
 
 # Get allowed extensions and upload folder from config
 def allowed_file(filename):
-    return '.' in filename and \
-        filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+    if '.' not in filename:
+        return False
+    ext = filename.rsplit('.', 1)[1].lower()
+    
+    # For profile picture uploads
+    if request.endpoint == 'upload_profile_picture':
+        return ext in app.config['ALLOWED_EXTENSIONS']
+    
+    # For file sharing in chat
+    return ext not in app.config['BLOCKED_EXTENSIONS']
 
 # Configuration for mail server, serializer and SQLAlchemy
 db.init_app(app)
@@ -699,29 +707,40 @@ def share_file():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
 
-        if file and allowed_file(file.filename):
-            # Process and store file
-            filename = secure_filename(file.filename)
-            file_content = file.read()
-            
-            # Encrypt file content
-            encrypted_content = message_handler.encrypt_file(file_content)
-            
-            # Store in IPFS
-            ipfs_hash = ipfs_handler.add_content(encrypted_content)
-            
-            # Create file message structure
-            file_data = {
-                'filename': filename,
-                'ipfs_hash': ipfs_hash,
-                'type': 'file'
-            }
-            
-            return jsonify({
-                'success': True,
-                'file_link': f'/download/{ipfs_hash}/{filename}',
-                'file_data': file_data
-            })
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File type not allowed'}), 400
+
+        # Read and encrypt the file content
+        file_content = file.read()
+        encrypted_content = message_handler.encrypt_file(file_content)
+
+        # Upload to IPFS
+        ipfs_hash = ipfs_handler.add_content(encrypted_content)
+        
+        # Store file hash on blockchain using Infura
+        try:
+            tx_receipt = infura_handler.store_file_hash(
+                ipfs_hash, 
+                current_user.eth_address
+            )
+            tx_hash = tx_receipt['transactionHash'].hex()
+            app.logger.info(f"File hash stored on blockchain. Transaction hash: {tx_hash}")
+        except Exception as e:
+            app.logger.error(f"Blockchain storage error: {str(e)}")
+            tx_hash = None
+
+        file_data = {
+            'ipfs_hash': ipfs_hash,
+            'filename': secure_filename(file.filename),
+            'tx_hash': tx_hash
+        }
+
+        return jsonify({
+            'success': True,
+            'file_link': f'/api/download_file/{ipfs_hash}/{secure_filename(file.filename)}',
+            'file_data': file_data,
+            'tx_hash': tx_hash  # Include transaction hash in response
+        })
 
     except Exception as e:
         app.logger.error(f"Error sharing file: {str(e)}")

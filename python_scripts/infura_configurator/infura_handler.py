@@ -95,7 +95,7 @@ class InfuraHandler:
             'nonce': self.w3_http.eth.get_transaction_count(Config.ETHEREUM_ADDRESS),
         })
         signed_tx = self.w3_http.eth.account.sign_transaction(tx, Config.ETHEREUM_PRIVATE_KEY)
-        tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.rawTransaction)
+        tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.raw_transaction)
         return self.w3_http.eth.wait_for_transaction_receipt(tx_hash)
 
     def get_chat_signature(self, chat_id):
@@ -108,35 +108,59 @@ class InfuraHandler:
         for attempt in range(max_attempts):
             try:
                 nonce = self.w3_http.eth.get_transaction_count(Config.ETHEREUM_ADDRESS)
-                gas_price = self.w3_http.eth.gas_price
+                
+                # Get the contract function
+                contract_function = self.file_contract.functions.storeFileHash(file_hash, owner)
                 
                 # Estimate gas
-                gas_estimate = self.file_contract.functions.storeFileHash(file_hash, owner).estimate_gas({
+                gas_estimate = contract_function.estimate_gas({'from': Config.ETHEREUM_ADDRESS})
+                
+                # Get current gas price
+                gas_price = self.w3_http.eth.gas_price
+                
+                # Build the transaction with estimated values
+                tx = contract_function.build_transaction({
                     'from': Config.ETHEREUM_ADDRESS,
                     'nonce': nonce,
-                    'gasPrice': gas_price,
+                    'gas': gas_estimate,
+                    'gasPrice': gas_price
                 })
                 
-                # Add some buffer to the gas estimate
-                gas_limit = int(gas_estimate * 1.2)
-
-                tx = self.file_contract.functions.storeFileHash(file_hash, owner).build_transaction({
-                    'from': Config.ETHEREUM_ADDRESS,
-                    'nonce': nonce,
-                    'gasPrice': gas_price,
-                    'gas': gas_limit,
-                })
+                # Log transaction details before sending
+                print(f"Transaction details:")
+                print(f"Gas price: {self.w3_http.from_wei(tx['gasPrice'], 'gwei')} gwei")
+                print(f"Gas limit: {tx['gas']}")
+                print(f"Estimated cost: {self.w3_http.from_wei(tx['gasPrice'] * tx['gas'], 'ether')} ETH")
                 
                 signed_tx = self.w3_http.eth.account.sign_transaction(tx, Config.ETHEREUM_PRIVATE_KEY)
                 tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.raw_transaction)
+                
+                # Wait for transaction receipt with timeout
                 tx_receipt = self.w3_http.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
                 
                 return tx_receipt
+                
             except Exception as e:
                 print(f"Attempt {attempt + 1} failed: {str(e)}")
                 if attempt == max_attempts - 1:
                     raise
                 time.sleep(2 ** attempt)  # Exponential backoff
+
+    def get_optimal_gas_price(self):
+        """Get an optimal gas price based on network conditions"""
+        base_fee = self.w3_http.eth.get_block('latest').get('baseFeePerGas', 0)
+        max_priority_fee = self.w3_http.eth.max_priority_fee
+        
+        # If network is congested, increase the gas price
+        if self.is_network_congested():
+            return int((base_fee * 2) + max_priority_fee)
+        return int(base_fee + max_priority_fee)
+
+    def is_network_congested(self):
+        """Check if the network is congested"""
+        latest_block = self.w3_http.eth.get_block('latest')
+        gas_used_ratio = latest_block['gasUsed'] / latest_block['gasLimit']
+        return gas_used_ratio > 0.8  # Consider network congested if gas usage is over 80%
 
     def get_file_owner(self, file_hash):
         try:
@@ -144,15 +168,3 @@ class InfuraHandler:
         except Exception as e:
             print(f"Error getting file owner: {str(e)}")
             return None
-
-    def get_optimal_gas_price(self):
-        base_fee = self.w3_http.eth.get_block('latest').get('baseFeePerGas', 0)
-        max_priority_fee = self.w3_http.eth.max_priority_fee
-        if self.is_network_congested():
-            return int((base_fee * 2) + max_priority_fee)  # Ensure return value is an integer
-        return int(base_fee + max_priority_fee)  # Ensure return value is an integer
-
-    def is_network_congested(self):
-        latest_block = self.w3_http.eth.get_block('latest')
-        gas_used_ratio = latest_block['gasUsed'] / latest_block['gasLimit']
-        return gas_used_ratio > 0.8  # Consider network congested if gas usage is over 80%

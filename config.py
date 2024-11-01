@@ -34,7 +34,20 @@ class Config:
 
     #Upload Folder Configuration
     UPLOAD_FOLDER = os.path.join('static', 'profile_pictures')
+    BLOCKED_EXTENSIONS = {
+        # Executable files
+        'exe', 'msi', 'bat', 'cmd', 'sh', 'bin', 'app',
+        # Script files
+        'vbs', 'ps1', 'js', 'py', 'php', 'pl', 'rb',
+        # System files
+        'sys', 'dll', 'reg', 'com',
+        # Other potentially dangerous files
+        'jar', 'apk', 'deb', 'rpm'
+    }
+
+    # Add this for profile pictures
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
     MAX_CONTENT_LENGTH = 100 * 1024 * 1024
     
     #FERNET KEY CONFIGURATION
