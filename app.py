@@ -13,7 +13,7 @@ import string
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import RequestEntityTooLarge
-from flask_socketio import SocketIO, emit, join_room, send
+from flask_socketio import SocketIO, emit, join_room, send, leave_room
 import requests
 import json
 import os
@@ -383,7 +383,7 @@ def search_users():
         return jsonify([])
     
     users = User.query.filter(User.username.ilike(f'%{query}%')).limit(10).all()
-    return jsonify([{'id': user.id, 'username': user.username} for user in users])
+    return jsonify([{'id': user.id, 'username': user.username, 'profile_picture': user.profile_picture if user.profile_picture else 'default.png'} for user in users])
 
 @app.route('/api/send_friend_request', methods=['POST'])
 @login_required
@@ -422,11 +422,14 @@ def api_send_friend_request():
 @app.route('/upload_profile_picture', methods=['POST'])
 @login_required
 def upload_profile_picture():
-    if 'file' not in request.files:
+    if 'profile_picture' not in request.files:
         return jsonify({"error": "No file part"}), 400
-    file = request.files['file']
+    
+    file = request.files['profile_picture']
+    
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
+        
     if file and allowed_file(file.filename):
         try:
             filename = secure_filename(file.filename)
@@ -440,15 +443,23 @@ def upload_profile_picture():
             db.session.commit()
             
             return jsonify({
+                "success": True,
                 "message": "Profile picture updated successfully",
                 "filename": new_filename
             }), 200
+            
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error uploading profile picture: {str(e)}")
-            return jsonify({"error": "An error occurred while uploading the profile picture"}), 500
+            return jsonify({
+                "success": False,
+                "error": "An error occurred while uploading the profile picture"
+            }), 500
     
-    return jsonify({"error": "File type not allowed"}), 400
+    return jsonify({
+        "success": False,
+        "error": "File type not allowed"
+    }), 400
 
 @app.route('/remove_profile_picture', methods=['POST'])
 @login_required
@@ -563,14 +574,38 @@ def handle_disconnect():
 def on_join(data):
     room = data['room']
     join_room(room)
-    app.logger.debug(f"User {current_user.id} joined room: {room}")
+    app.logger.debug(f"Client {request.sid} joined room: {room}")
 
-@socketio.on('new_message')
-def handle_new_message(data):
+@socketio.on('leave')
+def on_leave(data):
     room = data['room']
-    app.logger.debug(f"Received new_message event: {data}")
-    emit('new_message', data, room=room, include_self=False)
-    app.logger.debug(f"Emitted new_message event to room: {room}")
+    leave_room(room)
+    app.logger.debug(f"Client {request.sid} left room: {room}")
+
+@socketio.on('message')
+def handle_message(data):
+    try:
+        room = data['room']
+        content = data['content']
+        sender_id = data['sender_id']
+        recipient_id = data['recipient_id']
+        timestamp = data['timestamp']
+
+        # Store message in database/IPFS if needed
+        message_data = {
+            'sender_id': sender_id,
+            'recipient_id': recipient_id,
+            'content': content,
+            'timestamp': timestamp,
+            'room': room
+        }
+
+        # Emit to the room (both sender and recipient will receive it)
+        emit('new_message', message_data, room=room)
+        
+        app.logger.debug(f"Message sent in room {room}: {message_data}")
+    except Exception as e:
+        app.logger.error(f"Error handling message: {str(e)}")
 
 @app.route('/api/send_message', methods=['POST'])
 @login_required
@@ -581,78 +616,52 @@ def send_message():
     room = data.get('room')
     timestamp = data.get('timestamp')
     
-    app.logger.debug(f"Received message: {data}")
-    
     try:
-        # Retrieve current user's chat history
-        chat_history_hash = current_user.chat_history_hash
-        if chat_history_hash:
-            encrypted_history = ipfs_handler.get_content(chat_history_hash)
-            try:
-                chat_history = json.loads(encrypted_history)
-            except json.JSONDecodeError:
-                app.logger.error(f"Invalid JSON in chat history for user {current_user.id}")
-                chat_history = []
-        else:
+        # Store message for both users regardless of active chat
+        for user in [current_user, User.query.get(friend_id)]:
             chat_history = []
+            if user.chat_history_hash:
+                try:
+                    encrypted_history = ipfs_handler.get_content(user.chat_history_hash)
+                    chat_history = json.loads(encrypted_history)
+                except (json.JSONDecodeError, Exception) as e:
+                    app.logger.error(f"Error loading chat history for user {user.id}: {str(e)}")
+                    chat_history = []
 
-        # Encrypt the message before storing
-        encrypted_message = message_handler.encrypt_message(message_content)
+            # Encrypt the message
+            encrypted_message = message_handler.encrypt_message(message_content)
 
-        # Add new message
-        new_message = {
-            'sender_id': current_user.id,
-            'friend_id': friend_id,
-            'content': encrypted_message,
-            'timestamp': timestamp,
-            'cleared_by': []
-        }
-
-        chat_history.append(new_message)
-
-        # Store updated chat history in IPFS
-        updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
-
-        # Update current user's chat history hash
-        current_user.chat_history_hash = updated_history_hash
-
-        # Update friend's chat history
-        friend = User.query.get(friend_id)
-        friend_chat_history_hash = friend.chat_history_hash
-        if friend_chat_history_hash:
-            friend_encrypted_history = ipfs_handler.get_content(friend_chat_history_hash)
-            try:
-                friend_chat_history = json.loads(friend_encrypted_history)
-            except json.JSONDecodeError:
-                app.logger.error(f"Invalid JSON in chat history for user {friend_id}")
-                friend_chat_history = []
-        else:
-            friend_chat_history = []
-        
-        friend_chat_history.append(new_message)
-        friend_updated_history_hash = ipfs_handler.add_content(json.dumps(friend_chat_history))
-        friend.chat_history_hash = friend_updated_history_hash
+            # Add new message to history
+            new_message = {
+                'sender_id': current_user.id,
+                'friend_id': friend_id,
+                'content': encrypted_message,
+                'timestamp': timestamp,
+                'cleared_by': []
+            }
+            
+            chat_history.append(new_message)
+            
+            # Store updated history in IPFS
+            updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
+            user.chat_history_hash = updated_history_hash
 
         db.session.commit()
 
-        # Sign the chat after every 100 messages
-        if len(chat_history) % 100 == 0:
-            chat_id = f"{current_user.id}_{friend_id}"
-            tx_hash = infura_handler.sign_chat(chat_id, chat_history)
-            app.logger.info(f"Chat signed. Transaction hash: {tx_hash}")
-
-        app.logger.debug(f"Emitting new_message event: sender_id={current_user.id}, content={message_content}, timestamp={timestamp}, room={room}")
+        # Emit the message through socket
         socketio.emit('new_message', {
             'sender_id': current_user.id,
-            'content': message_content,  # Send unencrypted message to the client
+            'recipient_id': friend_id,
+            'content': message_content,
             'timestamp': timestamp,
             'room': room
-        }, room=room, namespace='/')
+        }, room=room)
 
-        return jsonify({"message": "Message sent successfully.", "ipfs_hash": updated_history_hash}), 200
+        return jsonify({"success": True, "message": "Message sent and stored successfully"}), 200
+
     except Exception as e:
         app.logger.error(f"Error in send_message: {str(e)}", exc_info=True)
-        return jsonify({"error": "An error occurred while sending the message."}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/store_message', methods=['POST'])
 @login_required

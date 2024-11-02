@@ -69,45 +69,207 @@ function handleFileSelection(event) {
 function shareFile(file) {
     if (isUploading) return;
 
-    const maxSize = 100 * 1024 * 1024; // 100 MB
-    if (file.size > maxSize) {
-        alert(`File is too large. Maximum file size is ${maxSize / (1024 * 1024)} MB.`);
-        return;
-    }
-
     isUploading = true;
     const shareFileBtn = document.getElementById('shareFileBtn');
     shareFileBtn.disabled = true;
 
+    // Show initial status
+    showUploadStatus('Preparing file for upload...', 0, {
+        steps: [
+            { id: 'prepare', label: 'Preparing file...', status: 'current' },
+            { id: 'ipfs', label: 'IPFS Upload', status: 'pending' },
+            { id: 'blockchain', label: 'Blockchain Verification', status: 'pending' }
+        ]
+    });
+
     const formData = new FormData();
     formData.append('file', file);
 
-    fetch('/api/share_file', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const txHashInfo = data.tx_hash ? 
-                `(Verified on blockchain: ${data.tx_hash})` : 
-                '(Blockchain verification pending...)';
-            
-            const message = `Shared file: [Download](${data.file_link}) ${txHashInfo}`;
-            sendMessage(currentChatFriendId, message);
-            document.getElementById('fileInput').value = '';
-        } else {
-            throw new Error(data.error || 'Unexpected response from server');
+    const xhr = new XMLHttpRequest();
+    
+    xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            updateUploadStatus('Uploading to IPFS...', percentComplete, {
+                steps: [
+                    { id: 'prepare', label: 'File prepared', status: 'complete' },
+                    { id: 'ipfs', label: `Uploading to IPFS... ${Math.round(percentComplete)}%`, status: 'current' },
+                    { id: 'blockchain', label: 'Waiting for blockchain...', status: 'pending' }
+                ]
+            });
         }
-    })
-    .catch(error => {
-        console.error('Error sharing file:', error);
-        alert('An error occurred while sharing the file. Please try again.');
-    })
-    .finally(() => {
+    };
+
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    if (response.success) {
+                        // Store IPFS hash from the response
+                        const ipfsHash = response.file_data.ipfs_hash;
+                        const txHash = response.tx_hash;
+
+                        updateUploadStatus('Verifying on blockchain...', 80, {
+                            steps: [
+                                { id: 'prepare', label: 'File prepared', status: 'complete' },
+                                { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' },
+                                { id: 'blockchain', label: 'Verifying on blockchain...', status: 'current' }
+                            ]
+                        });
+
+                        // Poll for blockchain confirmation using the correct IPFS hash
+                        let attempts = 0;
+                        const maxAttempts = 30; // Increase max attempts
+                        const checkBlockchain = setInterval(() => {
+                            attempts++;
+                            fetch(`/api/verify_file/${ipfsHash}`)
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.verified) {
+                                        clearInterval(checkBlockchain);
+                                        updateUploadStatus('File shared successfully!', 100, {
+                                            steps: [
+                                                { id: 'prepare', label: 'File prepared', status: 'complete' },
+                                                { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' },
+                                                { id: 'blockchain', label: 'Verified on blockchain', status: 'complete' }
+                                            ]
+                                        });
+
+                                        setTimeout(() => {
+                                            hideUploadStatus();
+                                            const message = `Shared file: [Download](${response.file_link}) (Verified on blockchain: ${txHash})`;
+                                            sendMessage(currentChatFriendId, message);
+                                            document.getElementById('fileInput').value = '';
+                                            isUploading = false;
+                                            shareFileBtn.disabled = false;
+                                        }, 1500);
+                                    } else if (attempts >= maxAttempts) {
+                                        clearInterval(checkBlockchain);
+                                        handleUploadError('Blockchain verification timed out');
+                                    }
+                                })
+                                .catch(error => {
+                                    clearInterval(checkBlockchain);
+                                    handleUploadError('Error verifying on blockchain');
+                                });
+                        }, 2000);
+                    } else {
+                        throw new Error(response.error || 'Upload failed');
+                    }
+                } catch (error) {
+                    handleUploadError(error.message);
+                }
+            } else {
+                handleUploadError('Upload failed');
+            }
+        }
+    };
+
+    xhr.onerror = () => handleUploadError('Network error occurred');
+    xhr.open('POST', '/api/share_file', true);
+    xhr.send(formData);
+}
+
+function handleUploadError(errorMessage) {
+    updateUploadStatus(errorMessage, 100, {
+        steps: [
+            { id: 'prepare', label: 'File prepared', status: 'error' },
+            { id: 'ipfs', label: 'IPFS Upload failed', status: 'error' },
+            { id: 'blockchain', label: 'Blockchain Verification failed', status: 'error' }
+        ]
+    }, true);
+    
+    setTimeout(() => {
+        hideUploadStatus();
         isUploading = false;
-        shareFileBtn.disabled = false;
-    });
+        document.getElementById('shareFileBtn').disabled = false;
+    }, 3000);
+}
+
+function showUploadStatus(message, progress, stepsData) {
+    let statusModal = document.getElementById('uploadStatusModal');
+    if (!statusModal) {
+        statusModal = document.createElement('div');
+        statusModal.id = 'uploadStatusModal';
+        statusModal.innerHTML = `
+            <div class="fixed inset-0 z-50 flex items-center justify-center">
+                <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
+                <div class="relative transform overflow-hidden rounded-lg bg-white px-4 py-5 shadow-xl transition-all sm:w-full sm:max-w-sm sm:p-6">
+                    <div class="text-center">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4" id="uploadStatusMessage"></h3>
+                        <div class="space-y-4 mb-4" id="uploadSteps"></div>
+                        <div class="mt-4">
+                            <div class="h-2 bg-gray-200 rounded-full">
+                                <div class="h-2 bg-primary rounded-full transition-all duration-500" id="uploadProgressBar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(statusModal);
+    }
+    statusModal.classList.remove('hidden');
+    updateUploadStatus(message, progress, stepsData);
+}
+
+function updateUploadStatus(message, progress, stepsData = null, isError = false) {
+    const statusMessage = document.getElementById('uploadStatusMessage');
+    const progressBar = document.getElementById('uploadProgressBar');
+    const stepsContainer = document.getElementById('uploadSteps');
+    
+    if (statusMessage && progressBar) {
+        statusMessage.textContent = message;
+        statusMessage.className = isError ? 'text-lg font-medium text-danger' : 'text-lg font-medium text-gray-900';
+        progressBar.style.width = `${progress}%`;
+        progressBar.className = `h-2 rounded-full transition-all duration-500 ${
+            isError ? 'bg-danger' : 'bg-primary'
+        }`;
+
+        // Handle steps display
+        if (stepsContainer && stepsData && Array.isArray(stepsData.steps)) {
+            stepsContainer.innerHTML = stepsData.steps.map(step => `
+                <div class="flex items-center space-x-3 mb-2">
+                    <div class="flex-shrink-0">
+                        ${getStepIcon(step.status)}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium ${getStepTextColor(step.status)}">
+                            ${step.label}
+                            ${step.progress ? `(${Math.round(step.progress)}%)` : ''}
+                        </p>
+                    </div>
+                </div>
+            `).join('');
+        }
+    }
+}
+
+function getStepIcon(status) {
+    switch (status) {
+        case 'complete':
+            return '<i class="fas fa-check-circle text-success text-lg"></i>';
+        case 'current':
+            return '<i class="fas fa-spinner fa-spin text-primary text-lg"></i>';
+        case 'error':
+            return '<i class="fas fa-times-circle text-danger text-lg"></i>';
+        default:
+            return '<i class="fas fa-circle text-gray-300 text-lg"></i>';
+    }
+}
+
+function getStepTextColor(status) {
+    switch (status) {
+        case 'complete':
+            return 'text-success';
+        case 'current':
+            return 'text-primary';
+        case 'error':
+            return 'text-danger';
+        default:
+            return 'text-gray-500';
+    }
 }
 
 function verifyFile(ipfsHash) {
@@ -193,34 +355,45 @@ function startChat(friendId, friendName) {
         chatArea.classList.remove('d-none');
     }
 
+    // Clear existing messages
+    const messageArea = document.getElementById('messageArea');
+    messageArea.innerHTML = '';
+
     loadChatHistory(friendId);
 
-    // Remove existing listeners before adding new ones
+    // Remove existing message listeners
     socket.off('new_message');
 
+    // Create the room name using a consistent format
     const room = `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}`;
+    console.log('Joining room:', room);
+    
+    // Leave previous room if any
+    if (socket.currentRoom) {
+        socket.emit('leave', { room: socket.currentRoom });
+    }
+    
+    // Join new room
+    socket.currentRoom = room;
     socket.emit('join', { room: room });
 
-    // Create a Set to store unique message identifiers
-    const receivedMessages = new Set();
-
+    // Add the new message listener
     socket.on('new_message', (data) => {
-        console.log('Received new message:', data);
-        // Create a unique identifier for the message
-        const messageId = `${data.sender_id}-${data.timestamp}`;
+        console.log('Received message:', data);
         
-        // Check if we've already processed this message
-        if (!receivedMessages.has(messageId)) {
-            receivedMessages.add(messageId);
-            
-            addMessageToChat(data.sender_id, data.content, new Date(data.timestamp));
-            updateChatPreview(data.sender_id, data.content);
-        } else {
-            console.log('Duplicate message received, ignoring:', messageId);
+        // Add message to chat
+        addMessageToChat(data.sender_id, data.content, data.timestamp);
+        
+        // Update chat preview
+        if (window.updateChatPreview) {
+            updateChatPreview(
+                data.sender_id === currentUserId ? data.recipient_id : data.sender_id,
+                data.content
+            );
         }
     });
 
-    // Show the clear chat button when a chat is started
+    // Show the clear chat button
     const clearChatButton = document.getElementById('clearChatButton');
     if (clearChatButton) {
         clearChatButton.classList.remove('d-none');
@@ -230,11 +403,14 @@ function startChat(friendId, friendName) {
 }
 
 window.sendMessage = function(friendId, message) {
-    const room = `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}`;
-    const timestamp = new Date().toISOString();
+    if (!friendId || !message) return;
     
-    console.log('Sending message:', { friendId, message, room, timestamp });
-
+    const timestamp = new Date().toISOString();
+    const room = `chat_${Math.min(currentUserId, friendId)}_${Math.max(currentUserId, friendId)}`;
+    
+    // Don't add message locally anymore - wait for socket response
+    // This prevents duplication
+    
     fetch('/api/send_message', {
         method: 'POST',
         headers: {
@@ -243,8 +419,10 @@ window.sendMessage = function(friendId, message) {
         body: JSON.stringify({
             friend_id: friendId,
             message: message,
+            recipient_id: friendId,
+            timestamp: timestamp,
             room: room,
-            timestamp: timestamp
+            sender_id: currentUserId
         }),
     })
     .then(response => response.json())
@@ -262,56 +440,223 @@ window.sendMessage = function(friendId, message) {
 
 // Modify the loadChatHistory function to handle potentially cleared chat history
 function loadChatHistory(friendId) {
+    console.log('Loading chat history for friend:', friendId);
+    
+    // Clear previous chat
+    const messageArea = document.getElementById('messageArea');
+    messageArea.innerHTML = '';
+    
+    // Set current chat friend ID
+    currentChatFriendId = Number(friendId);
+    console.log('Set currentChatFriendId to:', currentChatFriendId);
+    
     fetch(`/api/chat_history/${friendId}`)
-    .then(response => response.json())
-    .then(data => {
-        console.log('Received chat history:', data);
-        const messageArea = document.getElementById('messageArea');
-        messageArea.innerHTML = ''; // Clear existing messages
-        if (data.messages && data.messages.length > 0) {
-            data.messages.forEach(msg => {
-                renderMessage(msg.sender_id, msg.content, msg.timestamp);
-            });
-        } else {
-            messageArea.innerHTML = '<p class="text-muted">No messages to display.</p>';
+        .then(response => response.json())
+        .then(data => {
+            if (data.messages && Array.isArray(data.messages)) {
+                data.messages.forEach(msg => {
+                    if (msg && msg.sender_id !== undefined && msg.content !== undefined) {
+                        addMessageToChat(
+                            msg.sender_id, 
+                            msg.content,
+                            msg.timestamp || new Date().toISOString()
+                        );
+                    }
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Error loading chat history:', error);
+            messageArea.innerHTML = '<p class="text-center text-gray-500 mt-4">Error loading chat history</p>';
+        });
+}
+
+function getFileIcon(fileName) {
+    // Get file extension
+    const ext = fileName.split('.').pop().toLowerCase();
+    
+    // Define file type patterns
+    const fileTypes = {
+        // Images
+        image: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'],
+        // Documents
+        pdf: ['pdf'],
+        word: ['doc', 'docx'],
+        excel: ['xls', 'xlsx', 'csv'],
+        powerpoint: ['ppt', 'pptx'],
+        text: ['txt', 'rtf', 'md'],
+        // Code
+        code: ['js', 'py', 'java', 'cpp', 'c', 'cs', 'html', 'css', 'php', 'json', 'xml'],
+        // Archives
+        archive: ['zip', 'rar', '7z', 'tar', 'gz'],
+        // Audio
+        audio: ['mp3', 'wav', 'ogg', 'm4a', 'flac'],
+        // Video
+        video: ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv'],
+        // Database
+        database: ['sql', 'db', 'sqlite', 'mdb']
+    };
+
+    // Return appropriate icon class based on file type
+    for (const [type, extensions] of Object.entries(fileTypes)) {
+        if (extensions.includes(ext)) {
+            switch (type) {
+                case 'image':
+                    return 'fa-file-image';
+                case 'pdf':
+                    return 'fa-file-pdf';
+                case 'word':
+                    return 'fa-file-word';
+                case 'excel':
+                    return 'fa-file-excel';
+                case 'powerpoint':
+                    return 'fa-file-powerpoint';
+                case 'text':
+                    return 'fa-file-lines';
+                case 'code':
+                    return 'fa-file-code';
+                case 'archive':
+                    return 'fa-file-zipper';
+                case 'audio':
+                    return 'fa-file-audio';
+                case 'video':
+                    return 'fa-file-video';
+                case 'database':
+                    return 'fa-database';
+            }
         }
-        // Scroll to the bottom of the message area
-        messageArea.scrollTop = messageArea.scrollHeight;
-    })
-    .catch(error => console.error('Error loading chat history:', error));
+    }
+    
+    // Default file icon
+    return 'fa-file';
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 function addMessageToChat(senderId, content, timestamp) {
     console.log('Adding message to chat:', { senderId, content, timestamp });
     
+    // Ensure content is a string and handle objects
+    let displayContent;
+    try {
+        if (typeof content === 'object') {
+            displayContent = content.message || content.content || JSON.stringify(content);
+        } else if (typeof content === 'string' && content.startsWith('{')) {
+            const parsed = JSON.parse(content);
+            displayContent = parsed.message || parsed.content || content;
+        } else {
+            displayContent = String(content || '');
+        }
+    } catch (e) {
+        displayContent = String(content || '');
+    }
+
     const messageArea = document.getElementById('messageArea');
     const messageElement = document.createElement('div');
-    messageElement.className = 'message';
-    const senderLabel = Number(senderId) === Number(currentUserId) ? 'You' : 'Friend';
+    messageElement.className = `message flex ${Number(senderId) === Number(currentUserId) ? 'justify-end' : 'justify-start'}`;
     
-    // Convert timestamp to local time
-    const localTimestamp = new Date(timestamp).toLocaleString();
+    // Check if the message contains a file link
+    const fileMatch = displayContent.match(/Shared file: \[Download\]\((\/api\/download_file\/[^\)]+)\)(.*)/);
     
-    // Replace download links with actual clickable links
-    content = content.replace(/Shared file: \[Download\]\((.*?)\)/g, (match, p1) => {
-        const fileName = p1.split('/').pop();
-        return `Shared file: <a href="${p1}" download="${fileName}">Download ${fileName}</a>`;
-    });
+    let messageHTML;
+    if (fileMatch) {
+        // Extract file information
+        const filePath = fileMatch[1];
+        const fileName = filePath.split('/').pop();
+        const fileIcon = getFileIcon(fileName);
+        const blockchainInfo = fileMatch[2] || ''; // Get blockchain verification info if present
+        
+        messageHTML = `
+            <div class="${Number(senderId) === Number(currentUserId) ? 
+                'bg-primary text-white' : 
+                'bg-gray-100 text-gray-900'} 
+                rounded-lg px-4 py-3 max-w-[70%]">
+                <div class="file-message group">
+                    <div class="file-icon-wrapper">
+                        <i class="fas ${fileIcon} text-2xl"></i>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium truncate max-w-[200px]">${fileName}</span>
+                        <a href="${filePath}" 
+                           class="text-sm ${Number(senderId) === Number(currentUserId) ? 
+                               'text-blue-100 hover:text-white' : 
+                               'text-blue-600 hover:text-blue-800'} 
+                           underline flex items-center gap-2 mt-1"
+                           target="_blank"
+                           download>
+                            <i class="fas fa-download text-xs"></i>
+                            <span>Download</span>
+                        </a>
+                        ${blockchainInfo ? `
+                            <div class="text-xs opacity-75 mt-1">
+                                <i class="fas fa-shield-check"></i> 
+                                Verified on blockchain
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+                <p class="text-xs opacity-70 mt-2">
+                    ${new Date(timestamp).toLocaleTimeString()}
+                </p>
+            </div>
+        `;
+    } else {
+        // Regular message handling (unchanged)
+        const escapedContent = displayContent
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
 
-    messageElement.innerHTML = `
-        <strong>${senderLabel}</strong>: ${content}
-        <small class="text-muted">${localTimestamp}</small>
-    `;
+        messageHTML = `
+            <div class="${Number(senderId) === Number(currentUserId) ? 
+                'bg-primary text-white' : 
+                'bg-gray-100 text-gray-900'} 
+                rounded-lg px-4 py-2 max-w-[70%]">
+                <p class="text-sm">${escapedContent}</p>
+                <p class="text-xs opacity-70 mt-1">
+                    ${new Date(timestamp).toLocaleTimeString()}
+                </p>
+            </div>
+        `;
+    }
+
+    messageElement.innerHTML = messageHTML;
     messageArea.appendChild(messageElement);
     messageArea.scrollTop = messageArea.scrollHeight;
-    
-    console.log('Message added to chat. Current message count:', messageArea.children.length);
 }
 
-function updateChatPreview(senderId, content) {
-    // Implement this function to update the chat preview in the friend list
-    // This is just a placeholder and should be implemented based on your UI
-    console.log('Updating chat preview:', { senderId, content });
+function updateChatPreview(chatId, lastMessage) {
+    console.log('Updating chat preview:', { chatId, lastMessage });
+    
+    let previewText;
+    try {
+        if (typeof lastMessage === 'object') {
+            previewText = lastMessage.message || lastMessage.content || JSON.stringify(lastMessage);
+        } else if (typeof lastMessage === 'string' && lastMessage.startsWith('{')) {
+            const parsed = JSON.parse(lastMessage);
+            previewText = parsed.message || parsed.content || lastMessage;
+        } else {
+            previewText = String(lastMessage || '');
+        }
+    } catch (e) {
+        previewText = String(lastMessage || '');
+    }
+
+    const chatLink = document.querySelector(`[data-chat-id="${chatId}"]`);
+    if (chatLink) {
+        const previewElement = chatLink.querySelector('small');
+        if (previewElement) {
+            previewElement.textContent = previewText;
+        }
+    }
 }
 
 // Optional: Function to remove the last message (in case of error)
@@ -438,3 +783,36 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     setupFileSharing();
 });
+
+function showBlockchainStatus() {
+    fetch('/get_blockchain_status')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (window.updateBlockchainMessage) {
+                window.updateBlockchainMessage(data.message, true);
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching blockchain status:', error);
+            // Don't show error to user unless necessary
+            // If you want to show error, uncomment below:
+            /*
+            if (window.updateBlockchainMessage) {
+                window.updateBlockchainMessage('Unable to fetch blockchain status', false);
+            }
+            */
+        });
+}
+
+// Add these new functions to handle the upload status UI
+function hideUploadStatus() {
+    const statusModal = document.getElementById('uploadStatusModal');
+    if (statusModal) {
+        statusModal.classList.add('hidden');
+    }
+}

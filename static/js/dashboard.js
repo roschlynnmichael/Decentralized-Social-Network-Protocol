@@ -1,3 +1,52 @@
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+function showCustomDialog(title, message, onConfirm = null) {
+    const dialog = document.getElementById('customDialog');
+    const dialogTitle = document.getElementById('dialogTitle');
+    const dialogMessage = document.getElementById('dialogMessage');
+    const confirmBtn = document.getElementById('dialogConfirm');
+    const cancelBtn = document.getElementById('dialogCancel');
+
+    dialogTitle.textContent = title;
+    dialogMessage.textContent = message;
+
+    // Show/hide buttons based on whether there's a confirm callback
+    if (onConfirm) {
+        confirmBtn.style.display = 'inline-flex';
+        cancelBtn.textContent = 'No';
+        confirmBtn.textContent = 'Yes';
+    } else {
+        confirmBtn.style.display = 'none';
+        cancelBtn.textContent = 'Close';
+    }
+
+    const closeDialog = () => {
+        dialog.classList.add('hidden');
+        confirmBtn.removeEventListener('click', handleConfirm);
+        cancelBtn.removeEventListener('click', closeDialog);
+    };
+
+    const handleConfirm = () => {
+        if (onConfirm) onConfirm();
+        closeDialog();
+    };
+
+    confirmBtn.addEventListener('click', handleConfirm);
+    cancelBtn.addEventListener('click', closeDialog);
+
+    dialog.classList.remove('hidden');
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const socket = io();
     const chatList = document.getElementById('chatList');
@@ -11,17 +60,44 @@ document.addEventListener('DOMContentLoaded', function() {
     const notificationList = document.getElementById('notificationList');
     const notificationBadge = document.getElementById('notificationBadge');
     const usernameSpan = document.getElementById('username');
-    const noNotifications = document.getElementById('noNotifications');
     const friendSearchResults = document.getElementById('friendSearchResults');
     const changeProfilePic = document.getElementById('changeProfilePic');
     const removeProfilePic = document.getElementById('removeProfilePic');
-    const profilePicModal = new bootstrap.Modal(document.getElementById('profilePicModal'));
-    const profilePicForm = document.getElementById('profilePicForm');
     const profilePicInput = document.getElementById('profilePicInput');
     const uploadProfilePic = document.getElementById('uploadProfilePic');
     const navProfilePic = document.getElementById('navProfilePic');
+    const notificationButton = document.getElementById('notificationDropdown');
+    const notificationDropdown = document.getElementById('notificationList');
 
     let currentChatId = null;
+
+    // Tab switching functionality
+    const tabs = document.querySelectorAll('[data-tab]');
+    const chatsPane = document.getElementById('chatsPane');
+    const friendsPane = document.getElementById('friendsPane');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active state from all tabs
+            tabs.forEach(t => {
+                t.classList.remove('bg-primary', 'text-white');
+                t.classList.add('text-text-secondary', 'hover:bg-gray-100');
+            });
+
+            // Add active state to clicked tab
+            tab.classList.remove('text-text-secondary', 'hover:bg-gray-100');
+            tab.classList.add('bg-primary', 'text-white');
+
+            // Show/hide appropriate pane
+            if (tab.dataset.tab === 'chats') {
+                chatsPane.classList.remove('hidden');
+                friendsPane.classList.add('hidden');
+            } else {
+                chatsPane.classList.add('hidden');
+                friendsPane.classList.remove('hidden');
+            }
+        });
+    });
 
     // Socket event listeners
     socket.on('connect', () => {
@@ -38,7 +114,6 @@ document.addEventListener('DOMContentLoaded', function() {
         updateChatPreview(data.chat_id, data.content);
     });
 
-    // Add this new socket event listener
     socket.on('friend_request_accepted', (data) => {
         addFriendToList(data);
     });
@@ -48,73 +123,24 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         if (messageInput.value && currentChatId) {
             window.sendMessage(currentChatId, messageInput.value);
-            // Remove this line, as we're clearing the input in the sendMessage function
-            // messageInput.value = '';
         }
     });
 
-    friendSearch.addEventListener('input', debounce(() => {
-        searchFriends(friendSearch.value);
-    }, 300));
+    if (friendSearch) {
+        friendSearch.addEventListener('input', debounce(function() {
+            if (friendSearch.value) {
+                searchFriends(friendSearch.value);
+            } else {
+                friendSearchResults.innerHTML = ''; // Clear results if search is empty
+            }
+        }, 300));
+    }
 
     logoutBtn.addEventListener('click', () => {
         window.location.href = '/logout';
     });
 
-    changeProfilePic.addEventListener('click', () => {
-        profilePicModal.show();
-    });
-
-    removeProfilePic.addEventListener('click', () => {
-        if (confirm('Are you sure you want to remove your profile picture?')) {
-            fetch('/remove_profile_picture', {
-                method: 'POST'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.message) {
-                    alert(data.message);
-                    updateProfilePicture('default.png');
-                } else {
-                    alert(data.error || 'An error occurred while removing the profile picture');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred while removing the profile picture');
-            });
-        }
-    });
-
-    uploadProfilePic.addEventListener('click', () => {
-        const file = profilePicInput.files[0];
-        if (file) {
-            const formData = new FormData();
-            formData.append('file', file);
-
-            fetch('/upload_profile_picture', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.filename) {
-                    updateProfilePicture(data.filename);
-                    profilePicModal.hide();
-                    alert('Profile picture updated successfully');
-                } else {
-                    alert(data.error || 'An error occurred while updating the profile picture');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred while updating the profile picture');
-            });
-        } else {
-            alert('Please select a file first');
-        }
-    });
-
+    // Helper functions
     function updateProfilePicture(filename) {
         const newProfilePicUrl = `/static/profile_pictures/${filename}`;
         document.querySelectorAll('img[alt="Profile"]').forEach(img => {
@@ -122,7 +148,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Helper functions
     function appendMessage(sender, message) {
         const messageElement = document.createElement('p');
         messageElement.textContent = `${sender}: ${message}`;
@@ -146,27 +171,6 @@ document.addEventListener('DOMContentLoaded', function() {
             openChat(chatId, name);
         });
         chatList.appendChild(li);
-    }
-
-    function openChat(friendId, friendName) {
-        currentChatId = friendId;
-        startChat(friendId, friendName);
-        const chatArea = document.getElementById('chatArea');
-        if (chatArea) {
-            chatArea.classList.remove('d-none');
-        }
-    }
-
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
     }
 
     // IPFS-related functions
@@ -200,52 +204,100 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function searchFriends(query) {
         if (query.length < 3) {
-            friendSearchResults.innerHTML = '<li class="list-group-item">Type at least 3 characters to search</li>';
+            friendSearchResults.innerHTML = `
+                <div class="p-4 text-text-secondary text-sm">
+                    Type at least 3 characters to search
+                </div>`;
             return;
         }
-
+    
         fetch(`/api/search_users?query=${encodeURIComponent(query)}`)
             .then(response => response.json())
             .then(users => {
                 friendSearchResults.innerHTML = '';
                 if (users.length === 0) {
-                    friendSearchResults.innerHTML = '<li class="list-group-item">No users found</li>';
+                    friendSearchResults.innerHTML = `
+                        <div class="p-4 text-text-secondary text-sm">
+                            No users found
+                        </div>`;
                 } else {
                     users.forEach(user => {
-                        const li = document.createElement('li');
-                        li.className = 'list-group-item d-flex justify-content-between align-items-center';
-                        li.innerHTML = `
-                            ${user.username}
-                            <button class="btn btn-sm btn-primary add-friend-btn" data-user-id="${user.id}">Add Friend</button>
+                        const div = document.createElement('div');
+                        div.className = 'p-4 hover:bg-gray-50 border-b border-border last:border-b-0';
+                        div.innerHTML = `
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <img src="/static/profile_pictures/${user.profile_picture || 'default.png'}" 
+                                         alt="${user.username}" 
+                                         class="w-8 h-8 rounded-full object-cover"
+                                         onerror="this.src='/static/profile_pictures/default.png'">
+                                    <span class="font-medium">${user.username}</span>
+                                </div>
+                                <button class="add-friend-btn px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 transition-colors"
+                                        data-user-id="${user.id}">
+                                    Add Friend
+                                </button>
+                            </div>
                         `;
-                        li.querySelector('.add-friend-btn').addEventListener('click', () => sendFriendRequest(user.id));
-                        friendSearchResults.appendChild(li);
+                        
+                        // Add click event listener to the button
+                        const addButton = div.querySelector('.add-friend-btn');
+                        addButton.addEventListener('click', () => {
+                            sendFriendRequest(user.id);
+                        });
+                        
+                        friendSearchResults.appendChild(div);
                     });
                 }
             })
-            .catch(error => console.error('Error searching users:', error));
+            .catch(error => {
+                console.error('Error searching users:', error);
+                friendSearchResults.innerHTML = `
+                    <div class="p-4 text-danger text-sm">
+                        Error searching for users
+                    </div>`;
+            });
     }
 
     function sendFriendRequest(userId) {
+        // First, show confirmation dialog
+        if (!confirm('Do you want to send a friend request?')) {
+            return; // User clicked "No"
+        }
+
         fetch('/api/send_friend_request', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ receiver_id: userId }),
+            body: JSON.stringify({
+                receiver_id: userId
+            })
         })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => { throw err; });
-            }
-            return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
-            alert(data.message);
+            if (data.message) {
+                // Success case
+                alert('Friend request sent successfully!');
+                // Clear the search
+                if (friendSearch) {
+                    friendSearch.value = '';
+                    friendSearchResults.innerHTML = '';
+                }
+            } else if (data.error) {
+                // Error case - check for specific error messages
+                if (data.error.includes('already friends') || 
+                    data.error.includes('already sent') || 
+                    data.error.includes('pending')) {
+                    alert('You are already friends or have a pending request with this user.');
+                } else {
+                    alert(data.error);
+                }
+            }
         })
         .catch(error => {
-            console.error('Error sending friend request:', error);
-            alert(error.error || 'An error occurred while sending the friend request.');
+            console.error('Error:', error);
+            alert('An error occurred while sending the friend request.');
         });
     }
 
@@ -254,24 +306,46 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => response.json())
         .then(requests => {
             notificationList.innerHTML = ''; // Clear existing notifications
+            
             if (requests.length === 0) {
-                notificationBadge.style.display = 'none';
-                notificationList.innerHTML = '<li class="dropdown-item" id="noNotifications">No notifications for today</li>';
+                notificationList.innerHTML = `
+                    <div class="p-4 text-center text-gray-500 text-sm">
+                        No pending friend requests
+                    </div>`;
+                notificationBadge.textContent = '0';
             } else {
-                notificationBadge.style.display = 'inline-block';
                 notificationBadge.textContent = requests.length;
                 requests.forEach(request => {
-                    const li = document.createElement('li');
-                    li.className = 'notification-item dropdown-item';
+                    const li = document.createElement('div');
+                    li.className = 'p-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0';
                     li.innerHTML = `
-                        <div>${request.sender_username} wants to be your friend</div>
-                        <div class="notification-buttons">
-                            <button class="btn btn-sm btn-success accept-request" data-request-id="${request.id}">Accept</button>
-                            <button class="btn btn-sm btn-danger reject-request" data-request-id="${request.id}">Reject</button>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex items-center gap-2">
+                                <img src="/static/profile_pictures/${request.sender_profile_picture || 'default.png'}" 
+                                     alt="${request.sender_username}" 
+                                     class="w-8 h-8 rounded-full object-cover"
+                                     onerror="this.src='/static/profile_pictures/default.png'">
+                                <span class="font-medium text-sm">${request.sender_username}</span>
+                                <span class="text-sm text-gray-500">wants to be your friend</span>
+                            </div>
+                            <div class="flex gap-2 justify-end">
+                                <button class="accept-btn px-4 py-1.5 bg-primary text-white text-sm rounded-md hover:bg-blue-600 transition-colors">
+                                    Accept
+                                </button>
+                                <button class="reject-btn px-4 py-1.5 bg-danger text-white text-sm rounded-md hover:bg-red-600 transition-colors">
+                                    Reject
+                                </button>
+                            </div>
                         </div>
                     `;
-                    li.querySelector('.accept-request').addEventListener('click', () => acceptFriendRequest(request.id));
-                    li.querySelector('.reject-request').addEventListener('click', () => rejectFriendRequest(request.id));
+
+                    // Add event listeners to the buttons
+                    const acceptBtn = li.querySelector('.accept-btn');
+                    const rejectBtn = li.querySelector('.reject-btn');
+                    
+                    acceptBtn.addEventListener('click', () => acceptFriendRequest(request.id));
+                    rejectBtn.addEventListener('click', () => rejectFriendRequest(request.id));
+
                     notificationList.appendChild(li);
                 });
             }
@@ -280,7 +354,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function acceptFriendRequest(requestId) {
-        fetch(`/accept_friend_request/${requestId}`, { method: 'POST' })
+        fetch(`/accept_friend_request/${requestId}`, {
+            method: 'POST'
+        })
         .then(response => {
             if (!response.ok) {
                 return response.json().then(err => { throw err; });
@@ -288,19 +364,21 @@ document.addEventListener('DOMContentLoaded', function() {
             return response.json();
         })
         .then(data => {
-            alert(data.message);
-            loadFriendRequests(); // Reload the friend requests
-            // Remove this line as we'll update the friend list via WebSocket
-            // fetchFriends();
+            showCustomDialog('Success', data.message, () => {
+                loadFriendRequests(); // Reload the notifications
+                fetchFriends(); // Reload the friends list
+            });
         })
         .catch(error => {
             console.error('Error:', error);
-            alert(error.error || 'An error occurred while accepting the friend request.');
+            showCustomDialog('Error', error.error || 'An error occurred while accepting the friend request.');
         });
     }
 
     function rejectFriendRequest(requestId) {
-        fetch(`/reject_friend_request/${requestId}`, { method: 'POST' })
+        fetch(`/reject_friend_request/${requestId}`, {
+            method: 'POST'
+        })
         .then(response => {
             if (!response.ok) {
                 return response.json().then(err => { throw err; });
@@ -308,12 +386,13 @@ document.addEventListener('DOMContentLoaded', function() {
             return response.json();
         })
         .then(data => {
-            alert(data.message);
-            loadFriendRequests(); // Reload the friend requests
+            showCustomDialog('Success', data.message, () => {
+                loadFriendRequests(); // Reload the notifications
+            });
         })
         .catch(error => {
             console.error('Error:', error);
-            alert(error.error || 'An error occurred while rejecting the friend request.');
+            showCustomDialog('Error', error.error || 'An error occurred while rejecting the friend request.');
         });
     }
 
@@ -339,19 +418,27 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function addFriendToList(friend) {
-        const existingFriend = document.querySelector(`#chatList [data-friend-id="${friend.friend_id}"]`);
-        if (existingFriend) {
-            return; // Friend already in the list, no need to add again
-        }
-
         const li = document.createElement('li');
-        li.className = 'nav-item';
+        li.className = 'hover:bg-gray-50 transition-colors';
         li.innerHTML = `
-            <a class="nav-link d-flex align-items-center" href="#" data-friend-id="${friend.friend_id}">
-                <img src="/static/profile_pictures/${friend.friend_profile_picture}" alt="${friend.friend_username}" class="rounded-circle me-2" width="32" height="32">
-                <span class="flex-grow-1">${friend.friend_username}</span>
+            <a href="#" class="flex items-center gap-3 px-4 py-3">
+                <div class="flex-shrink-0">
+                    <img src="/static/profile_pictures/${friend.friend_profile_picture || 'default.png'}" 
+                         alt="${friend.friend_username}" 
+                         class="w-10 h-10 rounded-full object-cover"
+                         onerror="this.src='/static/profile_pictures/default.png'">
+                </div>
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm font-medium text-gray-900 truncate">
+                        ${friend.friend_username}
+                    </p>
+                    <p class="text-sm text-gray-500 truncate">
+                        Click to start chatting
+                    </p>
+                </div>
             </a>
         `;
+
         li.querySelector('a').addEventListener('click', (e) => {
             e.preventDefault();
             openChat(friend.friend_id, friend.friend_username);
@@ -366,5 +453,247 @@ document.addEventListener('DOMContentLoaded', function() {
         if (chatArea) {
             chatArea.classList.remove('d-none');
         }
+    }
+
+    if (notificationButton && notificationDropdown) {
+        notificationButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            notificationDropdown.classList.toggle('hidden');
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!notificationDropdown.contains(e.target) && !notificationButton.contains(e.target)) {
+                notificationDropdown.classList.add('hidden');
+            }
+        });
+    }
+
+    // Add chat search functionality
+    const chatSearch = document.getElementById('chatSearch');
+    if (chatSearch) {
+        chatSearch.addEventListener('input', debounce((e) => {
+            const searchTerm = e.target.value.toLowerCase().trim();
+            const chatItems = chatList.querySelectorAll('li');
+            let visibleChats = 0;
+            
+            chatItems.forEach(item => {
+                const username = item.querySelector('span').textContent.toLowerCase();
+                if (username.includes(searchTerm)) {
+                    item.style.display = 'flex';
+                    visibleChats++;
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+
+            // Show "no results" message if no chats are visible
+            const noResultsMsg = chatList.querySelector('.no-results-message');
+            
+            if (visibleChats === 0 && searchTerm !== '') {
+                if (!noResultsMsg) {
+                    const message = document.createElement('div');
+                    message.className = 'no-results-message p-4 text-center text-gray-500';
+                    message.textContent = 'No chats found';
+                    chatList.appendChild(message);
+                }
+            } else if (noResultsMsg) {
+                noResultsMsg.remove();
+            }
+        }, 300));
+
+        // Clear search results when input is cleared
+        chatSearch.addEventListener('change', (e) => {
+            if (!e.target.value) {
+                const chatItems = chatList.querySelectorAll('li');
+                chatItems.forEach(item => {
+                    item.style.display = 'flex';
+                });
+                const noResultsMsg = chatList.querySelector('.no-results-message');
+                if (noResultsMsg) {
+                    noResultsMsg.remove();
+                }
+            }
+        });
+    }
+
+    // Profile Dropdown functionality
+    const profileDropdown = document.getElementById('profileDropdown');
+    const profileDropdownMenu = document.getElementById('profileDropdownMenu');
+    const profileDropdownContainer = document.getElementById('profileDropdownContainer');
+
+    if (profileDropdown && profileDropdownMenu) {
+        profileDropdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+            profileDropdownMenu.classList.toggle('hidden');
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!profileDropdownContainer.contains(e.target)) {
+                profileDropdownMenu.classList.add('hidden');
+            }
+        });
+
+        // Handle profile picture change button
+        const changeProfilePic = document.getElementById('changeProfilePic');
+        if (changeProfilePic) {
+            changeProfilePic.addEventListener('click', () => {
+                // Hide the dropdown menu
+                profileDropdownMenu.classList.add('hidden');
+                
+                // Show the modal
+                const modal = document.getElementById('profilePicModal');
+                if (modal) {
+                    modal.classList.remove('hidden');
+                }
+            });
+        }
+
+        // Handle profile picture removal button
+        const removeProfilePic = document.getElementById('removeProfilePic');
+        if (removeProfilePic) {
+            removeProfilePic.addEventListener('click', (e) => {
+                // Prevent any default browser behavior
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Hide the dropdown menu first
+                profileDropdownMenu.classList.add('hidden');
+                
+                // Show custom confirmation dialog
+                showCustomDialog(
+                    'Remove Profile Picture',
+                    'Are you sure you want to remove your profile picture?',
+                    () => {
+                        fetch('/remove_profile_picture', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                return response.json().then(data => {
+                                    throw new Error(data.error || 'Failed to remove profile picture');
+                                });
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            if (data.success) {
+                                // Update all profile pictures to default
+                                const profilePics = document.querySelectorAll('#navProfilePic, #profileDropdown img');
+                                profilePics.forEach(pic => {
+                                    pic.src = '/static/profile_pictures/default.png';
+                                });
+                                showCustomDialog('Success', 'Profile picture removed successfully');
+                            } else {
+                                throw new Error(data.error || 'Failed to remove profile picture');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            showCustomDialog('Error', error.message || 'An error occurred while removing the profile picture');
+                        });
+                    }
+                );
+            });
+        }
+    }
+    
+    if (profilePicInput) {
+        profilePicInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                // Validate file type
+                if (!file.type.startsWith('image/')) {
+                    showCustomDialog('Error', 'Please select an image file');
+                    profilePicInput.value = '';
+                    return;
+                }
+
+                // Show preview
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const imagePreview = document.getElementById('imagePreview');
+                    if (imagePreview) {
+                        imagePreview.innerHTML = `
+                            <img src="${e.target.result}" 
+                                 class="max-h-48 rounded-lg object-contain" 
+                                 alt="Preview">
+                        `;
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    if (uploadProfilePic) {
+        uploadProfilePic.addEventListener('click', () => {
+            const file = profilePicInput.files[0];
+            if (!file) {
+                showCustomDialog('Error', 'Please select a file first');
+                return;
+            }
+
+            // Create FormData
+            const formData = new FormData();
+            formData.append('profile_picture', file);
+
+            // Show loading state
+            uploadProfilePic.disabled = true;
+            uploadProfilePic.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Uploading...';
+
+            // Upload the file
+            fetch('/upload_profile_picture', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Update all profile pictures
+                    const profilePics = document.querySelectorAll('#navProfilePic, #profileDropdown img');
+                    const timestamp = new Date().getTime();
+                    profilePics.forEach(pic => {
+                        pic.src = `/static/profile_pictures/${data.filename}?${timestamp}`;
+                    });
+
+                    // Close modal
+                    const modal = document.getElementById('profilePicModal');
+                    if (modal) {
+                        modal.classList.add('hidden');
+                    }
+
+                    // Reset form
+                    profilePicInput.value = '';
+                    const imagePreview = document.getElementById('imagePreview');
+                    imagePreview.innerHTML = `
+                        <div class="text-center">
+                            <i class="fas fa-image text-4xl text-gray-400"></i>
+                            <p class="mt-1 text-sm text-gray-500">
+                                Preview will appear here
+                            </p>
+                        </div>
+                    `;
+
+                    // Show success message
+                    showCustomDialog('Success', 'Profile picture updated successfully');
+                } else {
+                    throw new Error(data.error || 'Failed to update profile picture');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showCustomDialog('Error', 'An error occurred while updating the profile picture');
+            })
+            .finally(() => {
+                // Reset button state
+                uploadProfilePic.disabled = false;
+                uploadProfilePic.innerHTML = 'Upload';
+            });
+        });
     }
 });
