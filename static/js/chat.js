@@ -785,7 +785,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function showBlockchainStatus() {
-    fetch('/get_blockchain_status')
+    fetch('/api/blockchain_status')
         .then(response => {
             if (!response.ok) {
                 throw new Error('Network response was not ok');
@@ -816,3 +816,67 @@ function hideUploadStatus() {
         statusModal.classList.add('hidden');
     }
 }
+
+// Add these functions to handle typing indicators
+let typingTimeout;
+
+function showTypingIndicator(friendId) {
+    const messageArea = document.getElementById('messageArea');
+    const existingIndicator = document.getElementById('typing-indicator');
+    
+    if (!existingIndicator) {
+        const indicatorElement = document.createElement('div');
+        indicatorElement.id = 'typing-indicator';
+        indicatorElement.className = 'flex justify-start mb-4';
+        indicatorElement.innerHTML = `
+            <div class="bg-gray-100 rounded-lg px-4 py-2 max-w-[70%] shadow-sm">
+                <div class="flex items-center gap-2">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            </div>
+        `;
+        messageArea.appendChild(indicatorElement);
+        messageArea.scrollTop = messageArea.scrollHeight;
+    }
+}
+
+function removeTypingIndicator() {
+    const indicator = document.getElementById('typing-indicator');
+    if (indicator) {
+        indicator.remove();
+    }
+}
+
+// Add typing event emitters
+const messageInput = document.getElementById('messageInput');
+messageInput.addEventListener('input', () => {
+    if (currentChatFriendId) {
+        socket.emit('typing', {
+            room: `chat_${Math.min(currentUserId, currentChatFriendId)}_${Math.max(currentUserId, currentChatFriendId)}`,
+            user_id: currentUserId
+        });
+        
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            socket.emit('stop_typing', {
+                room: `chat_${Math.min(currentUserId, currentChatFriendId)}_${Math.max(currentUserId, currentChatFriendId)}`,
+                user_id: currentUserId
+            });
+        }, 1000);
+    }
+});
+
+// Add socket listeners for typing
+socket.on('user_typing', (data) => {
+    if (Number(data.user_id) !== Number(currentUserId)) {
+        showTypingIndicator(data.user_id);
+    }
+});
+
+socket.on('user_stop_typing', (data) => {
+    if (Number(data.user_id) !== Number(currentUserId)) {
+        removeTypingIndicator();
+    }
+});

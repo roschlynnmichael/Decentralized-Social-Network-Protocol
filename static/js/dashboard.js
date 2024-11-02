@@ -203,14 +203,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function searchFriends(query) {
-        if (query.length < 3) {
-            friendSearchResults.innerHTML = `
-                <div class="p-4 text-text-secondary text-sm">
-                    Type at least 3 characters to search
-                </div>`;
-            return;
-        }
-    
         fetch(`/api/search_users?query=${encodeURIComponent(query)}`)
             .then(response => response.json())
             .then(users => {
@@ -222,18 +214,27 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>`;
                 } else {
                     users.forEach(user => {
-                        const div = document.createElement('div');
-                        div.className = 'p-4 hover:bg-gray-50 border-b border-border last:border-b-0';
+                        const div = document.createElement('li');
+                        div.className = 'hover:bg-gray-50 transition-colors';
                         div.innerHTML = `
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center space-x-3">
-                                    <img src="/static/profile_pictures/${user.profile_picture || 'default.png'}" 
-                                         alt="${user.username}" 
-                                         class="w-8 h-8 rounded-full object-cover"
-                                         onerror="this.src='/static/profile_pictures/default.png'">
-                                    <span class="font-medium">${user.username}</span>
+                            <div class="flex items-center justify-between px-4 py-3">
+                                <div class="flex items-center gap-3">
+                                    <div class="flex-shrink-0">
+                                        <img src="/static/profile_pictures/${user.profile_picture || 'default.png'}" 
+                                             alt="${user.username}" 
+                                             class="w-10 h-10 rounded-full object-cover"
+                                             onerror="this.src='/static/profile_pictures/default.png'">
+                                    </div>
+                                    <div class="min-w-0 flex-1">
+                                        <p class="text-sm font-medium text-gray-900 truncate">
+                                            ${user.username}
+                                        </p>
+                                        <p class="text-sm text-gray-500 truncate">
+                                            Click to add friend
+                                        </p>
+                                    </div>
                                 </div>
-                                <button class="add-friend-btn px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 transition-colors"
+                                <button class="add-friend-btn ml-4 px-4 py-2 bg-primary text-white text-sm rounded-lg hover:bg-blue-600 transition-colors"
                                         data-user-id="${user.id}">
                                     Add Friend
                                 </button>
@@ -478,9 +479,9 @@ document.addEventListener('DOMContentLoaded', function() {
             let visibleChats = 0;
             
             chatItems.forEach(item => {
-                const username = item.querySelector('span').textContent.toLowerCase();
+                const username = item.querySelector('.text-gray-900').textContent.toLowerCase();
                 if (username.includes(searchTerm)) {
-                    item.style.display = 'flex';
+                    item.style.display = 'block';
                     visibleChats++;
                 } else {
                     item.style.display = 'none';
@@ -507,7 +508,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!e.target.value) {
                 const chatItems = chatList.querySelectorAll('li');
                 chatItems.forEach(item => {
-                    item.style.display = 'flex';
+                    item.style.display = 'block';
                 });
                 const noResultsMsg = chatList.querySelector('.no-results-message');
                 if (noResultsMsg) {

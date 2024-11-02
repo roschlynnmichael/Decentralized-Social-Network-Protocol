@@ -839,6 +839,31 @@ def blockchain_status():
         app.logger.error(f"Error checking blockchain status: {str(e)}")
         return jsonify({"connected": False, "error": str(e)}), 500
 
+@socketio.on('typing')
+def handle_typing(data):
+    room = data.get('room')
+    user_id = data.get('user_id')
+    emit('user_typing', {'user_id': user_id}, room=room)
+
+@socketio.on('stop_typing')
+def handle_stop_typing(data):
+    room = data.get('room')
+    user_id = data.get('user_id')
+    emit('user_stop_typing', {'user_id': user_id}, room=room)
+
+@socketio.on('message_reaction')
+def handle_reaction(data):
+    room = data.get('room')
+    message_id = data.get('message_id')
+    reaction = data.get('reaction')
+    user_id = data.get('user_id')
+    
+    emit('reaction_update', {
+        'message_id': message_id,
+        'reaction': reaction,
+        'user_id': user_id
+    }, room=room)
+
 if __name__ == '__main__':
     with app.app_context():
         create_database_if_not_exists(app)
