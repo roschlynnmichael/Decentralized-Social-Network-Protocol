@@ -27,7 +27,7 @@ class Config:
     ETHEREUM_PRIVATE_KEY = '0xcb1c615b965bc0c247ec3d16aecb9512467352f9ed559b655019e612a24461e4'
 
     #AWS EC2 Configuration
-    EC2_PUBLIC_IP = '13.59.2.130'
+    EC2_PUBLIC_IP = '18.222.221.201'
     NGINX_USERNAME = 'roschlynnmichael'
     NGINX_PASSWORD = 'Dsouza3191@'
     MAX_IPFS_LENGTH = 250 * 1024 * 1024
