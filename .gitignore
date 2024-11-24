@@ -5,3 +5,5 @@ artifacts
 migration.py
 venv
 .venv
+/static/profile_pictures/*
+!/static/profile_pictures/default.png
