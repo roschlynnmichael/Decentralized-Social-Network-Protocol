@@ -7,7 +7,7 @@ load_dotenv()
 class Config:
     DB_PASSWORD = quote('Dsouza@3191')
     SECRET_KEY = os.urandom(32)
-    SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://p2p_user:{DB_PASSWORD}@localhost:3306/p2p_social_network'
+    SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://p2p_user:{DB_PASSWORD}@192.168.8.208:3306/p2p_social_network'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     #Mail Server Configuration
@@ -27,9 +27,9 @@ class Config:
     ETHEREUM_PRIVATE_KEY = '0xcb1c615b965bc0c247ec3d16aecb9512467352f9ed559b655019e612a24461e4'
 
     #AWS EC2 Configuration
-    EC2_PUBLIC_IP = '18.222.221.201'
-    NGINX_USERNAME = 'roschlynnmichael'
-    NGINX_PASSWORD = 'Dsouza3191@'
+    EC2_PUBLIC_IP = '192.168.8.208'
+    #NGINX_USERNAME = 'roschlynnmichael'
+    #NGINX_PASSWORD = 'Dsouza3191@'
     MAX_IPFS_LENGTH = 250 * 1024 * 1024
 
     #Upload Folder Configuration

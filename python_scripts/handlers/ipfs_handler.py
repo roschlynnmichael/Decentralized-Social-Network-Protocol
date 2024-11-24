@@ -1,25 +1,17 @@
 import requests
-from requests.auth import HTTPBasicAuth
 import time
 import json
 from config import Config
 
 class IPFSHandler:
     def __init__(self):
-        self.ipfs_api_url = f'http://{Config.EC2_PUBLIC_IP}:8080/api/v0'
-        self.auth = (Config.NGINX_USERNAME, Config.NGINX_PASSWORD)
+        self.ipfs_api_url = f'http://{Config.EC2_PUBLIC_IP}:5001/api/v0'
 
     def add_content(self, content):
         try:
             files = {'file': ('filename', content)}
-            headers = {
-                'Host': Config.EC2_PUBLIC_IP,
-                'X-Real-IP': '127.0.0.1',
-                'X-Forwarded-For': '127.0.0.1',
-                'X-Forwarded-Proto': 'http'
-            }
             print(f"Sending request to IPFS. Content length: {len(content)}")
-            response = requests.post(f'{self.ipfs_api_url}/add', files=files, auth=self.auth, headers=headers)
+            response = requests.post(f'{self.ipfs_api_url}/add', files=files)
             print(f"IPFS response status: {response.status_code}")
             print(f"IPFS response content: {response.text}")
             if response.status_code == 200:
@@ -33,7 +25,7 @@ class IPFSHandler:
 
     def get_content(self, ipfs_hash):
         try:
-            response = requests.post(f'{self.ipfs_api_url}/cat?arg={ipfs_hash}', auth=self.auth)
+            response = requests.post(f'{self.ipfs_api_url}/cat?arg={ipfs_hash}')
             if response.status_code == 200:
                 return response.content  # Return raw bytes instead of decoding
             else:
