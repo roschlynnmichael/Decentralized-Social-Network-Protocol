@@ -163,89 +163,92 @@ function handleUploadError(errorMessage) {
     }, 3000);
 }
 
-function showUploadStatus(message, progress, stepsData) {
-    let statusModal = document.getElementById('uploadStatusModal');
-    if (!statusModal) {
-        statusModal = document.createElement('div');
-        statusModal.id = 'uploadStatusModal';
-        statusModal.innerHTML = `
-            <div class="fixed inset-0 z-50 flex items-center justify-center">
-                <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
-                <div class="relative transform overflow-hidden rounded-lg bg-white px-4 py-5 shadow-xl transition-all sm:w-full sm:max-w-sm sm:p-6">
-                    <div class="text-center">
-                        <h3 class="text-lg font-medium text-gray-900 mb-4" id="uploadStatusMessage"></h3>
-                        <div class="space-y-4 mb-4" id="uploadSteps"></div>
-                        <div class="mt-4">
-                            <div class="h-2 bg-gray-200 rounded-full">
-                                <div class="h-2 bg-primary rounded-full transition-all duration-500" id="uploadProgressBar"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(statusModal);
-    }
-    statusModal.classList.remove('hidden');
-    updateUploadStatus(message, progress, stepsData);
+function updateUploadStatus(message, progress, stepsData, uploadId) {
+    showUploadStatus(message, progress, stepsData, uploadId);
 }
 
-function updateUploadStatus(message, progress, stepsData = null, isError = false) {
-    const statusMessage = document.getElementById('uploadStatusMessage');
-    const progressBar = document.getElementById('uploadProgressBar');
-    const stepsContainer = document.getElementById('uploadSteps');
-    
-    if (statusMessage && progressBar) {
-        statusMessage.textContent = message;
-        statusMessage.className = isError ? 'text-lg font-medium text-danger' : 'text-lg font-medium text-gray-900';
-        progressBar.style.width = `${progress}%`;
-        progressBar.className = `h-2 rounded-full transition-all duration-500 ${
-            isError ? 'bg-danger' : 'bg-primary'
-        }`;
+function showUploadStatus(message, progress, stepsData, uploadId) {
+    let statusContainer = document.getElementById('uploadStatusContainer');
+    if (!statusContainer) {
+        statusContainer = document.createElement('div');
+        statusContainer.id = 'uploadStatusContainer';
+        statusContainer.className = 'fixed bottom-4 right-4 space-y-2 z-50';
+        document.body.appendChild(statusContainer);
+    }
 
-        // Handle steps display
-        if (stepsContainer && stepsData && Array.isArray(stepsData.steps)) {
-            stepsContainer.innerHTML = stepsData.steps.map(step => `
-                <div class="flex items-center space-x-3 mb-2">
-                    <div class="flex-shrink-0">
-                        ${getStepIcon(step.status)}
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium ${getStepTextColor(step.status)}">
-                            ${step.label}
-                            ${step.progress ? `(${Math.round(step.progress)}%)` : ''}
-                        </p>
-                    </div>
-                </div>
-            `).join('');
+    let statusElement = document.getElementById(`upload-${uploadId}`);
+    if (!statusElement) {
+        statusElement = document.createElement('div');
+        statusElement.id = `upload-${uploadId}`;
+        statusElement.className = 'flyout-notification bg-white shadow-lg rounded-lg p-4';
+        statusElement.innerHTML = `
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700">
+                    Sending file to: ${currentChatName || 'User'}
+                </span>
+                <button class="text-gray-400 hover:text-gray-600" onclick="removeUploadStatus('${uploadId}')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="text-sm text-gray-600 mb-2">${message}</div>
+            <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-600 transition-all duration-300" style="width: ${progress}%"></div>
+            </div>
+            <div class="mt-2 flex gap-2">
+                ${stepsData.steps.map(step => `
+                    <span class="text-xs ${step.status === 'complete' ? 'text-green-500' : 
+                                        step.status === 'current' ? 'text-blue-500' : 
+                                        step.status === 'error' ? 'text-red-500' : 
+                                        'text-gray-400'}">
+                        ${step.label}
+                    </span>
+                `).join(' • ')}
+            </div>
+        `;
+        statusContainer.appendChild(statusElement);
+        
+        // Trigger animation after a small delay
+        setTimeout(() => {
+            statusElement.classList.add('show');
+        }, 100);
+    } else {
+        // Update existing notification
+        const messageEl = statusElement.querySelector('.text-gray-600');
+        const progressBar = statusElement.querySelector('.bg-blue-600');
+        const stepsEl = statusElement.querySelector('.mt-2');
+        
+        if (messageEl) messageEl.textContent = message;
+        if (progressBar) progressBar.style.width = `${progress}%`;
+        if (stepsEl) {
+            stepsEl.innerHTML = stepsData.steps.map(step => `
+                <span class="text-xs ${step.status === 'complete' ? 'text-green-500' : 
+                                    step.status === 'current' ? 'text-blue-500' : 
+                                    step.status === 'error' ? 'text-red-500' : 
+                                    'text-gray-400'}">
+                    ${step.label}
+                </span>
+            `).join(' • ');
         }
     }
 }
 
-function getStepIcon(status) {
-    switch (status) {
-        case 'complete':
-            return '<i class="fas fa-check-circle text-success text-lg"></i>';
-        case 'current':
-            return '<i class="fas fa-spinner fa-spin text-primary text-lg"></i>';
-        case 'error':
-            return '<i class="fas fa-times-circle text-danger text-lg"></i>';
-        default:
-            return '<i class="fas fa-circle text-gray-300 text-lg"></i>';
+function removeUploadStatus(uploadId) {
+    const statusElement = document.getElementById(`upload-${uploadId}`);
+    if (statusElement) {
+        statusElement.classList.remove('show');
+        setTimeout(() => {
+            statusElement.remove();
+        }, 300);
     }
 }
 
-function getStepTextColor(status) {
-    switch (status) {
-        case 'complete':
-            return 'text-success';
-        case 'current':
-            return 'text-primary';
-        case 'error':
-            return 'text-danger';
-        default:
-            return 'text-gray-500';
-    }
+function handleUploadError(error, uploadId) {
+    showUploadStatus('Upload failed', 0, {
+        steps: [
+            { id: 'prepare', label: 'Preparation failed', status: 'error' },
+            { id: 'ipfs', label: 'Upload failed', status: 'error' }
+        ]
+    }, uploadId);
 }
 
 function renderMessage(senderId, content, timestamp) {
@@ -740,25 +743,3 @@ socket.on('upload_complete', (data) => {
 socket.on('upload_error', (data) => {
     handleUploadError(data.error, data.uploadId);
 });
-
-// Modify the upload status UI to handle multiple uploads
-function showUploadStatus(message, progress, stepsData, uploadId) {
-    let statusContainer = document.getElementById('uploadStatusContainer');
-    if (!statusContainer) {
-        statusContainer = document.createElement('div');
-        statusContainer.id = 'uploadStatusContainer';
-        statusContainer.className = 'fixed bottom-4 right-4 space-y-2 z-50';
-        document.body.appendChild(statusContainer);
-    }
-
-    let statusElement = document.getElementById(`upload-${uploadId}`);
-    if (!statusElement) {
-        statusElement = document.createElement('div');
-        statusElement.id = `upload-${uploadId}`;
-        statusElement.className = 'bg-white rounded-lg shadow-lg p-4 max-w-sm';
-        statusContainer.appendChild(statusElement);
-    }
-
-    // Update the status element content
-    updateUploadStatus(message, progress, stepsData, uploadId);
-}

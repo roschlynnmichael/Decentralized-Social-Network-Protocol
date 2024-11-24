@@ -267,3 +267,32 @@ body {
     0%, 60%, 100% { transform: translateY(0); }
     30% { transform: translateY(-4px); }
 }
+
+.flyout-notification {
+    transform: translateX(120%);
+    transition: transform 0.3s ease-in-out;
+    max-width: 320px;
+}
+
+.flyout-notification.show {
+    transform: translateX(0);
+}
+
+@keyframes progress {
+    from { width: 0%; }
+    to { width: 100%; }
+}
+
+.progress-bar {
+    height: 4px;
+    background: #e2e8f0;
+    border-radius: 2px;
+    margin-top: 8px;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: #2563eb;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
