@@ -323,6 +323,19 @@ def index():
         return redirect(url_for('dashboard'))
     else:
         return redirect(url_for('login'))
+    
+@app.errorhandler(404)
+def not_found_error(error):
+    if current_user.is_authenticated:
+        return render_template('404.html'), 404
+    return redirect(url_for('login'))
+
+@app.errorhandler(500)
+def internal_error(error):
+    db.session.rollback()
+    if request.is_xhr:
+        return jsonify({"error": "An internal server error occurred. Please try again later."}), 500
+    return render_template('500.html'), 500
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
