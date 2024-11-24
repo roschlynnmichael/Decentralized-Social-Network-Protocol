@@ -67,23 +67,21 @@ function handleFileSelection(event) {
 }
 
 function shareFile(file) {
-    if (isUploading) return;
-
-    isUploading = true;
-    const shareFileBtn = document.getElementById('shareFileBtn');
-    shareFileBtn.disabled = true;
-
-    // Show initial status
-    showUploadStatus('Preparing file for upload...', 0, {
-        steps: [
-            { id: 'prepare', label: 'Preparing file...', status: 'current' },
-            { id: 'ipfs', label: 'IPFS Upload', status: 'pending' }
-        ]
-    });
+    if (!file) return;
 
     const formData = new FormData();
     formData.append('file', file);
 
+    // Show initial status
+    const uploadId = `upload_${Date.now()}`;
+    showUploadStatus('Starting upload...', 0, {
+        steps: [
+            { id: 'prepare', label: 'Preparing file...', status: 'current' },
+            { id: 'ipfs', label: 'IPFS Upload', status: 'pending' }
+        ]
+    }, uploadId);
+
+    // Start the upload
     fetch('/api/share_file', {
         method: 'POST',
         body: formData
@@ -91,30 +89,63 @@ function shareFile(file) {
     .then(response => response.json())
     .then(response => {
         if (response.success) {
-            updateUploadStatus('File uploaded successfully!', 100, {
+            updateUploadStatus('Upload in progress...', 30, {
                 steps: [
                     { id: 'prepare', label: 'File prepared', status: 'complete' },
-                    { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' }
+                    { id: 'ipfs', label: 'IPFS Upload in progress', status: 'current' }
                 ]
-            });
+            }, uploadId);
 
-            setTimeout(() => {
-                hideUploadStatus();
-                const message = `Shared file: [Download](${response.file_link})`;
-                sendMessage(currentChatFriendId, message);
-            }, 1500);
+            // Poll for upload status
+            checkUploadStatus(response.task_id, uploadId);
         } else {
-            throw new Error(response.error || 'Failed to upload file');
+            throw new Error(response.error || 'Failed to start upload');
         }
     })
     .catch(error => {
         console.error('Error sharing file:', error);
-        handleUploadError(error.message);
-    })
-    .finally(() => {
-        isUploading = false;
-        shareFileBtn.disabled = false;
+        handleUploadError(error.message, uploadId);
     });
+}
+
+// Add new function to check upload status
+function checkUploadStatus(taskId, uploadId) {
+    const checkStatus = () => {
+        fetch(`/api/upload_status/${taskId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'completed' && data.file_link) {
+                    // Create file message and send it
+                    const fileMessage = `Shared file: [Download](${data.file_link})`;
+                    sendMessage(currentChatFriendId, fileMessage);
+                    
+                    // Update upload status UI
+                    updateUploadStatus('Upload complete!', 100, {
+                        steps: [
+                            { id: 'prepare', label: 'File prepared', status: 'complete' },
+                            { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' }
+                        ]
+                    }, uploadId);
+
+                    // Remove status after delay
+                    setTimeout(() => {
+                        removeUploadStatus(uploadId);
+                    }, 3000);
+                } else if (data.status === 'error') {
+                    handleUploadError(data.error || 'Upload failed', uploadId);
+                } else {
+                    // Continue polling
+                    setTimeout(checkStatus, 1000);
+                }
+            })
+            .catch(error => {
+                console.error('Error checking upload status:', error);
+                handleUploadError('Failed to check upload status', uploadId);
+            });
+    };
+
+    // Start polling
+    checkStatus();
 }
 
 function handleUploadError(errorMessage) {
@@ -686,3 +717,48 @@ socket.on('user_stop_typing', (data) => {
         removeTypingIndicator();
     }
 });
+
+// Add Socket.IO listeners for upload events
+socket.on('upload_complete', (data) => {
+    updateUploadStatus('Upload complete!', 100, {
+        steps: [
+            { id: 'prepare', label: 'File prepared', status: 'complete' },
+            { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' }
+        ]
+    }, data.uploadId);
+
+    // Add the file message to chat
+    const message = `Shared file: [Download](${data.file_link})`;
+    sendMessage(currentChatFriendId, message);
+
+    // Clean up the upload status after a delay
+    setTimeout(() => {
+        removeUploadStatus(data.uploadId);
+    }, 3000);
+});
+
+socket.on('upload_error', (data) => {
+    handleUploadError(data.error, data.uploadId);
+});
+
+// Modify the upload status UI to handle multiple uploads
+function showUploadStatus(message, progress, stepsData, uploadId) {
+    let statusContainer = document.getElementById('uploadStatusContainer');
+    if (!statusContainer) {
+        statusContainer = document.createElement('div');
+        statusContainer.id = 'uploadStatusContainer';
+        statusContainer.className = 'fixed bottom-4 right-4 space-y-2 z-50';
+        document.body.appendChild(statusContainer);
+    }
+
+    let statusElement = document.getElementById(`upload-${uploadId}`);
+    if (!statusElement) {
+        statusElement = document.createElement('div');
+        statusElement.id = `upload-${uploadId}`;
+        statusElement.className = 'bg-white rounded-lg shadow-lg p-4 max-w-sm';
+        statusContainer.appendChild(statusElement);
+    }
+
+    // Update the status element content
+    updateUploadStatus(message, progress, stepsData, uploadId);
+}

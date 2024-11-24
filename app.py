@@ -29,6 +29,10 @@ import logging
 import tempfile
 import hashlib
 import time
+from concurrent.futures import ThreadPoolExecutor
+
+upload_executor = ThreadPoolExecutor(max_workers=5)
+upload_status = {}
 
 load_dotenv()
 
@@ -766,6 +770,47 @@ def clear_chat(friend_id):
     except Exception as e:
         app.logger.error(f"Error clearing chat history: {str(e)}")
         return jsonify({"success": False, "error": "An error occurred while clearing chat history."}), 500
+    
+def handle_file_upload(file_content, filename, user_id, task_id):
+    try:
+        # Update status to processing
+        upload_status[task_id] = {'status': 'processing'}
+        
+        # Encrypt the file content
+        encrypted_content = message_handler.encrypt_file(file_content)
+
+        # Upload to IPFS
+        ipfs_hash = ipfs_handler.add_content(encrypted_content)
+
+        # Store the successful result
+        upload_status[task_id] = {
+            'status': 'completed',
+            'ipfs_hash': ipfs_hash,
+            'filename': filename,
+            'owner_id': user_id,
+            'file_link': f'/api/download_file/{ipfs_hash}/{filename}'
+        }
+        
+        # Emit the completion event via Socket.IO
+        socketio.emit('upload_complete', upload_status[task_id], room=f"user_{user_id}")
+        
+    except Exception as e:
+        app.logger.error(f"Error in file upload task: {str(e)}")
+        upload_status[task_id] = {
+            'status': 'error',
+            'error': str(e)
+        }
+        socketio.emit('upload_error', {
+            'task_id': task_id,
+            'error': str(e)
+        }, room=f"user_{user_id}")
+    
+    # Clean up status after 5 minutes
+    def cleanup_status():
+        time.sleep(300)  # 5 minutes
+        upload_status.pop(task_id, None)
+    
+    upload_executor.submit(cleanup_status)
 
 @app.route('/api/share_file', methods=['POST'])
 @login_required
@@ -781,28 +826,36 @@ def share_file():
         if not allowed_file(file.filename):
             return jsonify({'error': 'File type not allowed'}), 400
 
-        # Read and encrypt the file content
-        file_content = file.read()
-        encrypted_content = message_handler.encrypt_file(file_content)
-
-        # Upload to IPFS
-        ipfs_hash = ipfs_handler.add_content(encrypted_content)
-
-        file_data = {
-            'ipfs_hash': ipfs_hash,
-            'filename': secure_filename(file.filename),
-            'owner_id': current_user.id  # Store owner info directly
-        }
+        # Generate a unique task ID for this upload
+        task_id = f"upload_{int(time.time())}_{current_user.id}"
+        
+        # Start the upload process in a separate thread
+        upload_executor.submit(
+            handle_file_upload,
+            file.read(),
+            secure_filename(file.filename),
+            current_user.id,
+            task_id
+        )
 
         return jsonify({
             'success': True,
-            'file_link': f'/api/download_file/{ipfs_hash}/{secure_filename(file.filename)}',
-            'file_data': file_data
+            'task_id': task_id,
+            'message': 'Upload started'
         })
 
     except Exception as e:
-        app.logger.error(f"Error sharing file: {str(e)}")
+        app.logger.error(f"Error initiating file share: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/upload_status/<task_id>')
+@login_required
+def get_upload_status(task_id):
+    try:
+        status = upload_status.get(task_id, {'status': 'in_progress'})
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)})
 
 @app.route('/api/download_file/<ipfs_hash>/<filename>', methods=['GET'])
 @login_required
