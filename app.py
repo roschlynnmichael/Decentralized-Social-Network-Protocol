@@ -938,23 +938,3 @@ def handle_reaction(data):
         'reaction': reaction,
         'user_id': user_id
     }, room=room)
-
-
-if __name__ == '__main__':
-    try:
-        
-        # Initialize database within app context
-        with app.app_context():
-            create_database_if_not_exists(app)
-            db.create_all()
-
-        # Simplified run configuration
-        socketio.run(app, 
-                    host='0.0.0.0',  # Changed from 0.0.0.0 to localhost
-                    port=5000,
-                    debug=True,
-                    allow_unsafe_werkzeug=True)  # Added this parameter
-        
-    except Exception as e:
-        print(f"Error starting application: {str(e)}", exc_info=True)
-        raise
