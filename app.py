@@ -551,39 +551,72 @@ def get_friend_socket_info(friend_id):
 @login_required
 def get_chat_history(friend_id):
     try:
-        chat_history_hash = current_user.chat_history_hash
-        if not chat_history_hash:
-            return jsonify({'messages': []}), 200
+        # First check if friend exists
+        friend = User.query.get(friend_id)
+        if not friend:
+            app.logger.error(f"Friend with ID {friend_id} not found")
+            return jsonify({'messages': [], 'error': 'Friend not found'}), 404
 
-        encrypted_history = ipfs_handler.get_content(chat_history_hash)
-        if not encrypted_history:
+        chat_history_hash = current_user.chat_history_hash
+        app.logger.debug(f"Current user chat history hash: {chat_history_hash}")
+        
+        if not chat_history_hash:
+            app.logger.debug("No chat history hash found")
             return jsonify({'messages': []}), 200
 
         try:
-            chat_history = json.loads(encrypted_history)
-        except json.JSONDecodeError:
-            app.logger.error(f"Invalid JSON in chat history for user {current_user.id}")
-            return jsonify({'messages': [], 'error': 'Invalid chat history format'}), 200
+            # Get content from IPFS with detailed logging
+            app.logger.debug(f"Attempting to get content from IPFS with hash: {chat_history_hash}")
+            encrypted_history = ipfs_handler.get_content(chat_history_hash)
+            app.logger.debug(f"Retrieved encrypted history of length: {len(encrypted_history) if encrypted_history else 0}")
+            
+            if not encrypted_history:
+                app.logger.warning("No encrypted history retrieved from IPFS")
+                return jsonify({'messages': []}), 200
 
-        # Filter messages for the specific friend
-        filtered_history = [
-            msg for msg in chat_history 
-            if (msg['sender_id'] == current_user.id and msg['friend_id'] == friend_id) or 
-               (msg['sender_id'] == friend_id and msg['friend_id'] == current_user.id)
-        ]
-
-        # Decrypt message content
-        for msg in filtered_history:
+            # Try to decode the JSON
             try:
-                msg['content'] = message_handler.decrypt_message(msg['content'])
-            except Exception as e:
-                app.logger.error(f"Error decrypting message: {str(e)}")
-                msg['content'] = "Error: Could not decrypt message"
+                chat_history = json.loads(encrypted_history)
+                app.logger.debug(f"Successfully decoded JSON with {len(chat_history)} messages")
+            except json.JSONDecodeError as e:
+                app.logger.error(f"JSON decode error: {str(e)}")
+                app.logger.error(f"Raw content (first 200 chars): {encrypted_history[:200]}")
+                return jsonify({'messages': [], 'error': 'Invalid chat history format'}), 200
 
-        return jsonify({'messages': filtered_history}), 200
+            # Filter messages
+            filtered_history = [
+                msg for msg in chat_history 
+                if (msg['sender_id'] == current_user.id and msg['friend_id'] == friend_id) or 
+                   (msg['sender_id'] == friend_id and msg['friend_id'] == current_user.id)
+            ]
+            app.logger.debug(f"Filtered {len(filtered_history)} messages for friend {friend_id}")
+
+            # Decrypt messages
+            decrypted_history = []
+            for msg in filtered_history:
+                try:
+                    decrypted_msg = msg.copy()
+                    decrypted_msg['content'] = message_handler.decrypt_message(msg['content'])
+                    decrypted_history.append(decrypted_msg)
+                except Exception as e:
+                    app.logger.error(f"Error decrypting message: {str(e)}")
+                    decrypted_msg = msg.copy()
+                    decrypted_msg['content'] = "Error: Could not decrypt message"
+                    decrypted_history.append(decrypted_msg)
+
+            app.logger.debug(f"Successfully decrypted {len(decrypted_history)} messages")
+            return jsonify({'messages': decrypted_history}), 200
+
+        except Exception as e:
+            app.logger.error(f"Error with IPFS operations: {str(e)}")
+            raise
+
     except Exception as e:
         app.logger.error(f"Error retrieving chat history: {str(e)}", exc_info=True)
-        return jsonify({"error": "An error occurred while retrieving chat history."}), 500
+        return jsonify({
+            "error": "An error occurred while retrieving chat history.",
+            "details": str(e)
+        }), 500
 
 @socketio.on('connect')
 def handle_connect():
