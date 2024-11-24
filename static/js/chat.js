@@ -77,106 +77,51 @@ function shareFile(file) {
     showUploadStatus('Preparing file for upload...', 0, {
         steps: [
             { id: 'prepare', label: 'Preparing file...', status: 'current' },
-            { id: 'ipfs', label: 'IPFS Upload', status: 'pending' },
-            { id: 'blockchain', label: 'Blockchain Verification', status: 'pending' }
+            { id: 'ipfs', label: 'IPFS Upload', status: 'pending' }
         ]
     });
 
     const formData = new FormData();
     formData.append('file', file);
 
-    const xhr = new XMLHttpRequest();
-    
-    xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-            const percentComplete = (event.loaded / event.total) * 100;
-            updateUploadStatus('Uploading to IPFS...', percentComplete, {
+    fetch('/api/share_file', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(response => {
+        if (response.success) {
+            updateUploadStatus('File uploaded successfully!', 100, {
                 steps: [
                     { id: 'prepare', label: 'File prepared', status: 'complete' },
-                    { id: 'ipfs', label: `Uploading to IPFS... ${Math.round(percentComplete)}%`, status: 'current' },
-                    { id: 'blockchain', label: 'Waiting for blockchain...', status: 'pending' }
+                    { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' }
                 ]
             });
+
+            setTimeout(() => {
+                hideUploadStatus();
+                const message = `Shared file: [Download](${response.file_link})`;
+                sendMessage(currentChatFriendId, message);
+            }, 1500);
+        } else {
+            throw new Error(response.error || 'Failed to upload file');
         }
-    };
-
-    xhr.onreadystatechange = function() {
-        if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-                try {
-                    const response = JSON.parse(xhr.responseText);
-                    if (response.success) {
-                        // Store IPFS hash from the response
-                        const ipfsHash = response.file_data.ipfs_hash;
-                        const txHash = response.tx_hash;
-
-                        updateUploadStatus('Verifying on blockchain...', 80, {
-                            steps: [
-                                { id: 'prepare', label: 'File prepared', status: 'complete' },
-                                { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' },
-                                { id: 'blockchain', label: 'Verifying on blockchain...', status: 'current' }
-                            ]
-                        });
-
-                        // Poll for blockchain confirmation using the correct IPFS hash
-                        let attempts = 0;
-                        const maxAttempts = 30; // Increase max attempts
-                        const checkBlockchain = setInterval(() => {
-                            attempts++;
-                            fetch(`/api/verify_file/${ipfsHash}`)
-                                .then(res => res.json())
-                                .then(data => {
-                                    if (data.verified) {
-                                        clearInterval(checkBlockchain);
-                                        updateUploadStatus('File shared successfully!', 100, {
-                                            steps: [
-                                                { id: 'prepare', label: 'File prepared', status: 'complete' },
-                                                { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' },
-                                                { id: 'blockchain', label: 'Verified on blockchain', status: 'complete' }
-                                            ]
-                                        });
-
-                                        setTimeout(() => {
-                                            hideUploadStatus();
-                                            const message = `Shared file: [Download](${response.file_link}) (Verified on blockchain: ${txHash})`;
-                                            sendMessage(currentChatFriendId, message);
-                                            document.getElementById('fileInput').value = '';
-                                            isUploading = false;
-                                            shareFileBtn.disabled = false;
-                                        }, 1500);
-                                    } else if (attempts >= maxAttempts) {
-                                        clearInterval(checkBlockchain);
-                                        handleUploadError('Blockchain verification timed out');
-                                    }
-                                })
-                                .catch(error => {
-                                    clearInterval(checkBlockchain);
-                                    handleUploadError('Error verifying on blockchain');
-                                });
-                        }, 2000);
-                    } else {
-                        throw new Error(response.error || 'Upload failed');
-                    }
-                } catch (error) {
-                    handleUploadError(error.message);
-                }
-            } else {
-                handleUploadError('Upload failed');
-            }
-        }
-    };
-
-    xhr.onerror = () => handleUploadError('Network error occurred');
-    xhr.open('POST', '/api/share_file', true);
-    xhr.send(formData);
+    })
+    .catch(error => {
+        console.error('Error sharing file:', error);
+        handleUploadError(error.message);
+    })
+    .finally(() => {
+        isUploading = false;
+        shareFileBtn.disabled = false;
+    });
 }
 
 function handleUploadError(errorMessage) {
     updateUploadStatus(errorMessage, 100, {
         steps: [
             { id: 'prepare', label: 'File prepared', status: 'error' },
-            { id: 'ipfs', label: 'IPFS Upload failed', status: 'error' },
-            { id: 'blockchain', label: 'Blockchain Verification failed', status: 'error' }
+            { id: 'ipfs', label: 'IPFS Upload failed', status: 'error' }
         ]
     }, true);
     
@@ -270,22 +215,6 @@ function getStepTextColor(status) {
         default:
             return 'text-gray-500';
     }
-}
-
-function verifyFile(ipfsHash) {
-    fetch(`/api/verify_file/${ipfsHash}`)
-    .then(response => response.json())
-    .then(data => {
-        if (data.verified) {
-            alert(`File verified. Owner: ${data.owner}`);
-        } else {
-            alert('File verification failed.');
-        }
-    })
-    .catch(error => {
-        console.error('Error verifying file:', error);
-        alert('An error occurred while verifying the file.');
-    });
 }
 
 function renderMessage(senderId, content, timestamp) {
@@ -570,7 +499,6 @@ function addMessageToChat(senderId, content, timestamp) {
         const filePath = fileMatch[1];
         const fileName = filePath.split('/').pop();
         const fileIcon = getFileIcon(fileName);
-        const blockchainInfo = fileMatch[2] || ''; // Get blockchain verification info if present
         
         messageHTML = `
             <div class="${Number(senderId) === Number(currentUserId) ? 
@@ -593,12 +521,6 @@ function addMessageToChat(senderId, content, timestamp) {
                             <i class="fas fa-download text-xs"></i>
                             <span>Download</span>
                         </a>
-                        ${blockchainInfo ? `
-                            <div class="text-xs opacity-75 mt-1">
-                                <i class="fas fa-shield-check"></i> 
-                                Verified on blockchain
-                            </div>
-                        ` : ''}
                     </div>
                 </div>
                 <p class="text-xs opacity-70 mt-2">
@@ -676,98 +598,6 @@ function endChat() {
     document.getElementById('clearChatButton').style.display = 'none';
 }
 
-document.getElementById('signChatButton').addEventListener('click', function() {
-    fetch(`/api/sign_chat/${currentChatFriendId}`, {
-        method: 'POST'
-    })
-    .then(response => response.json())
-    .then(data => {
-        alert(`Chat signed. Signature: ${data.signature}`);
-    })
-    .catch(error => {
-        console.error('Error signing chat:', error);
-        alert('An error occurred while signing the chat.');
-    });
-});
-
-// Add this to your existing JavaScript
-function updateBlockchainStatus() {
-    fetch('/api/blockchain_status')
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Network response was not ok');
-        }
-        return response.json();
-    })
-    .then(data => {
-        const statusMessage = data.connected 
-            ? `Connected to blockchain (Block: ${data.latest_block})`
-            : 'Disconnected from blockchain';
-        
-        const statusClass = data.connected ? 'alert-success' : 'alert-danger';
-        
-        showBlockchainStatus(statusMessage, statusClass);
-    })
-    .catch(error => {
-        console.error('Error fetching blockchain status:', error);
-        showBlockchainStatus('Error checking blockchain status', 'alert-warning');
-    });
-}
-
-function showBlockchainStatus(message, alertClass) {
-    const modal = new bootstrap.Modal(document.getElementById('blockchainStatusModal'));
-    const messageElement = document.getElementById('blockchainStatusMessage');
-    messageElement.textContent = message;
-    messageElement.className = `alert ${alertClass}`;
-    modal.show();
-    setTimeout(() => modal.hide(), 10000); // Show for 10 seconds
-}
-
-// Call this function immediately and then periodically
-//updateBlockchainStatus();
-//setInterval(updateBlockchainStatus, 30000); // Update every 30 seconds
-
-let isConnectedToBlockchain = false;
-
-function checkBlockchainStatus() {
-    fetch('/api/blockchain_status')
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Network response was not ok');
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.connected && !isConnectedToBlockchain) {
-            showBlockchainStatus(`Connected to blockchain (Block: ${data.latest_block})`, 'alert-success');
-            isConnectedToBlockchain = true;
-        } else if (!data.connected && isConnectedToBlockchain) {
-            showBlockchainStatus('Disconnected from blockchain', 'alert-danger');
-            isConnectedToBlockchain = false;
-        }
-    })
-    .catch(error => {
-        console.error('Error fetching blockchain status:', error);
-        if (isConnectedToBlockchain) {
-            showBlockchainStatus('Error checking blockchain status', 'alert-warning');
-            isConnectedToBlockchain = false;
-        }
-    });
-}
-
-function showBlockchainStatus(message, alertClass) {
-    const modal = new bootstrap.Modal(document.getElementById('blockchainStatusModal'));
-    const messageElement = document.getElementById('blockchainStatusMessage');
-    messageElement.textContent = message;
-    messageElement.className = `alert ${alertClass}`;
-    modal.show();
-    setTimeout(() => modal.hide(), 10000); // Show for 10 seconds
-}
-
-// Check status initially and then every 30 seconds, but only show changes
-checkBlockchainStatus();
-setInterval(checkBlockchainStatus, 14400000); // Check every 4 hours (14400000 ms)
-
 document.addEventListener('DOMContentLoaded', function() {
     const messageForm = document.getElementById('messageForm');
     if (messageForm) {
@@ -784,30 +614,6 @@ document.addEventListener('DOMContentLoaded', function() {
     setupFileSharing();
 });
 
-function showBlockchainStatus() {
-    fetch('/api/blockchain_status')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (window.updateBlockchainMessage) {
-                window.updateBlockchainMessage(data.message, true);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching blockchain status:', error);
-            // Don't show error to user unless necessary
-            // If you want to show error, uncomment below:
-            /*
-            if (window.updateBlockchainMessage) {
-                window.updateBlockchainMessage('Unable to fetch blockchain status', false);
-            }
-            */
-        });
-}
 
 // Add these new functions to handle the upload status UI
 function hideUploadStatus() {

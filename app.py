@@ -6,9 +6,9 @@ from python_scripts.handlers.p2p_socket_handler import P2PSocketHandler
 from python_scripts.handlers.message_handler import MessageHandler
 from python_scripts.handlers.ipfs_handler import IPFSHandler
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from python_scripts.infura_configurator.infura_handler import InfuraHandler
 import smtplib
 import random
+import logging
 import string
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -22,14 +22,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
 from urllib.parse import quote
 from dotenv import load_dotenv
-from python_scripts.eth_account_maker.eth_account_generator import generate_eth_address
 from sqlalchemy_utils import database_exists, create_database
 from datetime import datetime
 from werkzeug.utils import secure_filename
 import logging
 import tempfile
-from python_scripts.infura_configurator.infura_handler import InfuraHandler
-from web3 import Web3
 import hashlib
 import time
 
@@ -51,15 +48,19 @@ mail = Mail(app)
 #IPFS Setup
 ipfs_handler = IPFSHandler()
 
+# Add health check
+if not ipfs_handler.check_ipfs_health():
+    app.logger.error(f"IPFS connection failed! Please check if IPFS daemon is running at {Config.IPFS_API_HOST}:{Config.IPFS_API_PORT}")
+    # You might want to handle this error appropriately
+else:
+    app.logger.info(f"Successfully connected to IPFS node at {Config.IPFS_API_HOST}:{Config.IPFS_API_PORT}")
+
 #Message Handler Setup
 message_handler = MessageHandler()
 
 # Login Manager Setup
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-
-#Infura Handler Setup
-infura_handler = InfuraHandler(app)
 
 # Get allowed extensions and upload folder from config
 def allowed_file(filename):
@@ -77,9 +78,6 @@ def allowed_file(filename):
 # Configuration for mail server, serializer and SQLAlchemy
 db.init_app(app)
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-
-# IPFS API endpoint
-IPFS_API = f'http://{Config.EC2_PUBLIC_IP}:8080/api/v0'
 
 def create_database_if_not_exists(app):
     try:
@@ -126,10 +124,7 @@ def register():
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "Email already exists"}), 400
     
-    # Generate Ethereum address
-    eth_address, eth_private_key = generate_eth_address()
-
-    user = User(username=username, email=email, eth_address=eth_address)
+    user = User(username=username, email=email)
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
@@ -147,7 +142,6 @@ def register():
         send_email(subject, body, sender, recipients, password)
         return jsonify({
             "message": "Registration successful. Please check your email for activation link.",
-            "eth_address": eth_address
         }), 201
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
@@ -646,6 +640,10 @@ def send_message():
     timestamp = data.get('timestamp')
     
     try:
+        # Check IPFS health before proceeding
+        if not ipfs_handler.check_ipfs_health():
+            raise Exception("IPFS service is not available")
+
         # Store message for both users regardless of active chat
         for user in [current_user, User.query.get(friend_id)]:
             chat_history = []
@@ -653,27 +651,28 @@ def send_message():
                 try:
                     encrypted_history = ipfs_handler.get_content(user.chat_history_hash)
                     chat_history = json.loads(encrypted_history)
-                except (json.JSONDecodeError, Exception) as e:
+                except Exception as e:
                     app.logger.error(f"Error loading chat history for user {user.id}: {str(e)}")
                     chat_history = []
-
-            # Encrypt the message
-            encrypted_message = message_handler.encrypt_message(message_content)
 
             # Add new message to history
             new_message = {
                 'sender_id': current_user.id,
                 'friend_id': friend_id,
-                'content': encrypted_message,
+                'content': message_handler.encrypt_message(message_content),
                 'timestamp': timestamp,
                 'cleared_by': []
             }
             
             chat_history.append(new_message)
             
-            # Store updated history in IPFS
-            updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
-            user.chat_history_hash = updated_history_hash
+            try:
+                # Store updated history in IPFS with timeout
+                updated_history_hash = ipfs_handler.add_content(json.dumps(chat_history))
+                user.chat_history_hash = updated_history_hash
+            except Exception as e:
+                app.logger.error(f"Failed to store chat history in IPFS: {str(e)}")
+                raise Exception("Failed to store message")
 
         db.session.commit()
 
@@ -690,6 +689,7 @@ def send_message():
 
     except Exception as e:
         app.logger.error(f"Error in send_message: {str(e)}", exc_info=True)
+        db.session.rollback()  # Add rollback in case of error
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/store_message', methods=['POST'])
@@ -754,30 +754,17 @@ def share_file():
 
         # Upload to IPFS
         ipfs_hash = ipfs_handler.add_content(encrypted_content)
-        
-        # Store file hash on blockchain using Infura
-        try:
-            tx_receipt = infura_handler.store_file_hash(
-                ipfs_hash, 
-                current_user.eth_address
-            )
-            tx_hash = tx_receipt['transactionHash'].hex()
-            app.logger.info(f"File hash stored on blockchain. Transaction hash: {tx_hash}")
-        except Exception as e:
-            app.logger.error(f"Blockchain storage error: {str(e)}")
-            tx_hash = None
 
         file_data = {
             'ipfs_hash': ipfs_hash,
             'filename': secure_filename(file.filename),
-            'tx_hash': tx_hash
+            'owner_id': current_user.id  # Store owner info directly
         }
 
         return jsonify({
             'success': True,
             'file_link': f'/api/download_file/{ipfs_hash}/{secure_filename(file.filename)}',
-            'file_data': file_data,
-            'tx_hash': tx_hash  # Include transaction hash in response
+            'file_data': file_data
         })
 
     except Exception as e:
@@ -814,59 +801,32 @@ def download_file(ipfs_hash, filename):
 @app.route('/api/sign_chat/<int:friend_id>', methods=['POST'])
 @login_required
 def sign_chat(friend_id):
-    chat_id = f"{current_user.id}_{friend_id}"
-    chat_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
-    chat_hash = hashlib.sha256(json.dumps(chat_history).encode()).hexdigest()
-    signature = infura_handler.sign_message(chat_hash)
-    return jsonify({"signature": signature}), 200
+    try:
+        chat_id = f"{current_user.id}_{friend_id}"
+        chat_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
+        chat_hash = hashlib.sha256(json.dumps(chat_history).encode()).hexdigest()
+        # Instead of blockchain signature, use a simple hash
+        signature = hashlib.sha256(f"{chat_hash}_{current_user.id}".encode()).hexdigest()
+        return jsonify({"signature": signature}), 200
+    except Exception as e:
+        app.logger.error(f"Error signing chat: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/verify_chat/<int:friend_id>', methods=['POST'])
 @login_required
 def verify_chat(friend_id):
-    data = request.json
-    chat_id = f"{current_user.id}_{friend_id}"
-    chat_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
-    chat_hash = hashlib.sha256(json.dumps(chat_history).encode()).hexdigest()
-    is_verified = infura_handler.verify_signature(chat_hash, data['signature'], current_user.eth_address)
-    return jsonify({"verified": is_verified}), 200
-
-@app.route('/api/send_eth', methods=['POST'])
-@login_required
-def send_eth():
-    data = request.json
-    to_address = data['to_address']
-    value = Web3.to_wei(data['amount'], 'ether')
-    tx_hash = infura_handler.send_transaction(to_address, value)
-    return jsonify({"transaction_hash": tx_hash}), 200
-
-@app.route('/api/verify_file/<ipfs_hash>', methods=['GET'])
-@login_required
-def verify_file(ipfs_hash):
     try:
-        owner_address = infura_handler.get_file_owner(ipfs_hash)
-        is_verified = owner_address.lower() == current_user.eth_address.lower()
-        return jsonify({"verified": is_verified, "owner": owner_address}), 200
+        data = request.json
+        chat_id = f"{current_user.id}_{friend_id}"
+        chat_history = json.loads(ipfs_handler.get_content(current_user.chat_history_hash))
+        chat_hash = hashlib.sha256(json.dumps(chat_history).encode()).hexdigest()
+        # Verify using the same simple hash method
+        expected_signature = hashlib.sha256(f"{chat_hash}_{current_user.id}".encode()).hexdigest()
+        is_verified = data['signature'] == expected_signature
+        return jsonify({"verified": is_verified}), 200
     except Exception as e:
-        app.logger.error(f"Error verifying file: {str(e)}")
-        return jsonify({"error": f"An error occurred while verifying the file: {str(e)}"}), 500
-
-@app.route('/transaction_history')
-@login_required
-def transaction_history():
-    # Fetch transaction history from Infura
-    # This is a placeholder - you'll need to implement the actual fetching logic
-    transactions = infura_handler.get_transaction_history(current_user.eth_address)
-    return render_template('transaction_history.html', transactions=transactions)
-
-@app.route('/api/blockchain_status', methods=['GET'])
-def blockchain_status():
-    try:
-        # Check if we can connect to the Ethereum network
-        latest_block = infura_handler.w3_http.eth.get_block('latest')
-        return jsonify({"connected": True, "latest_block": latest_block.number}), 200
-    except Exception as e:
-        app.logger.error(f"Error checking blockchain status: {str(e)}")
-        return jsonify({"connected": False, "error": str(e)}), 500
+        app.logger.error(f"Error verifying chat: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @socketio.on('typing')
 def handle_typing(data):
@@ -893,8 +853,22 @@ def handle_reaction(data):
         'user_id': user_id
     }, room=room)
 
-#if __name__ == '__main__':
-#    with app.app_context():
-#        create_database_if_not_exists(app)
-#        db.create_all()
-   # socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+
+if __name__ == '__main__':
+    try:
+        
+        # Initialize database within app context
+        with app.app_context():
+            create_database_if_not_exists(app)
+            db.create_all()
+
+        # Simplified run configuration
+        socketio.run(app, 
+                    host='0.0.0.0',  # Changed from 0.0.0.0 to localhost
+                    port=5000,
+                    debug=True,
+                    allow_unsafe_werkzeug=True)  # Added this parameter
+        
+    except Exception as e:
+        print(f"Error starting application: {str(e)}", exc_info=True)
+        raise
