@@ -24,7 +24,6 @@ if __name__ == '__main__':
         socketio.run(app, 
                     host='0.0.0.0',  # Changed from 0.0.0.0 to localhost
                     port=5000,
-                    debug=True,
                     allow_unsafe_werkzeug=True)  # Added this parameter
         
     except Exception as e:
