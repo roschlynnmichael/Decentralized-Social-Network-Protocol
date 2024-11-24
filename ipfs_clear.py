@@ -1,18 +1,16 @@
 import requests
-from requests.auth import HTTPBasicAuth
 import time
 from config import Config
 
 class IPFSCleaner:
     def __init__(self):
-        self.ipfs_api_url = f'http://{Config.EC2_PUBLIC_IP}:8080/api/v0'
-        self.auth = HTTPBasicAuth(Config.NGINX_USERNAME, Config.NGINX_PASSWORD)
+        self.ipfs_api_url = f'http://{Config.EC2_PUBLIC_IP}:5001/api/v0'
         self.max_retries = 3
 
     def connect_to_ipfs(self):
         for attempt in range(self.max_retries):
             try:
-                response = requests.post(f"{self.ipfs_api_url}/version", auth=self.auth)
+                response = requests.post(f"{self.ipfs_api_url}/version")
                 response.raise_for_status()
                 print("Successfully connected to IPFS")
                 return
@@ -26,7 +24,7 @@ class IPFSCleaner:
 
     def remove_content(self, ipfs_hash):
         try:
-            response = requests.post(f'{self.ipfs_api_url}/pin/rm?arg={ipfs_hash}', auth=self.auth)
+            response = requests.post(f'{self.ipfs_api_url}/pin/rm?arg={ipfs_hash}')
             if response.status_code == 200:
                 print(f"Successfully unpinned content with hash: {ipfs_hash}")
             else:
@@ -37,7 +35,7 @@ class IPFSCleaner:
     def clear_all_content(self):
         try:
             # List all pinned items
-            response = requests.post(f'{self.ipfs_api_url}/pin/ls', auth=self.auth)
+            response = requests.post(f'{self.ipfs_api_url}/pin/ls')
             if response.status_code == 200:
                 pinned_items = response.json()
                 for ipfs_hash in pinned_items.get('Keys', {}):
