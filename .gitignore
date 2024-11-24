@@ -3,3 +3,5 @@ enc_key.py
 .states
 artifacts
 migration.py
+venv
+.venv

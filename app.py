@@ -40,7 +40,11 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config.from_object('config.Config')
 
 # SocketIO Setup
-socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", manage_session=False, logger=True, engineio_logger=True)
+socketio = SocketIO(app, 
+                   cors_allowed_origins="*", 
+                   manage_session=False, 
+                   logger=True, 
+                   engineio_logger=True)
 
 mail = Mail(app)
 
@@ -893,4 +897,4 @@ def handle_reaction(data):
 #    with app.app_context():
 #        create_database_if_not_exists(app)
 #        db.create_all()
-#    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+   # socketio.run(app, debug=True, allow_unsafe_werkzeug=True)

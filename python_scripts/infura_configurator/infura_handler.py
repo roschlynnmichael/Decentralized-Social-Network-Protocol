@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from web3 import Web3
-from web3.providers import LegacyWebSocketProvider
+from web3.providers import WebsocketProvider
 from config import Config
 import json
 import hashlib
@@ -19,7 +19,7 @@ class InfuraHandler:
 
         # Initialize Web3 instances
         self.w3_http = Web3(Web3.HTTPProvider(self.http_endpoint))
-        self.w3_ws = Web3(LegacyWebSocketProvider(self.ws_endpoint))
+        self.w3_ws = Web3(WebsocketProvider(self.ws_endpoint))
 
         self.chat_contract = self.w3_http.eth.contract(
             address=Web3.to_checksum_address(app.config['CHAT_CONTRACT_ADDRESS']),

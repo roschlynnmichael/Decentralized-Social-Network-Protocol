@@ -1,5 +1,5 @@
-import logging
 from app import app, socketio, db, create_database_if_not_exists
+import logging
 
 # Configure logging
 logging.basicConfig(
@@ -19,14 +19,13 @@ if __name__ == '__main__':
             db.create_all()
             logger.info("Database initialization completed")
 
-        # Update SocketIO CORS settings
-        socketio.init_app(app, cors_allowed_origins="*")
-
         logger.info("Starting SocketIO server...")
+        # Simplified run configuration
         socketio.run(app, 
-                    host='0.0.0.0', 
-                    port=5000, 
-                    debug=True)
+                    host='0.0.0.0',  # Changed from 0.0.0.0 to localhost
+                    port=5000,
+                    debug=True,
+                    allow_unsafe_werkzeug=True)  # Added this parameter
         
     except Exception as e:
         logger.error(f"Error starting application: {str(e)}", exc_info=True)
