@@ -79,7 +79,7 @@ class InfuraHandler:
             'data': data
         }
         signed_txn = self.w3_http.eth.account.sign_transaction(transaction, Config.ETHEREUM_PRIVATE_KEY)
-        tx_hash = self.w3_http.eth.send_raw_transaction(signed_txn.raw_transaction)
+        tx_hash = self.w3_http.eth.send_raw_transaction(signed_txn.rawTransaction)
         return tx_hash.hex()
 
     def get_transaction_receipt(self, tx_hash):
@@ -95,7 +95,7 @@ class InfuraHandler:
             'nonce': self.w3_http.eth.get_transaction_count(Config.ETHEREUM_ADDRESS),
         })
         signed_tx = self.w3_http.eth.account.sign_transaction(tx, Config.ETHEREUM_PRIVATE_KEY)
-        tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.raw_transaction)
+        tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.rawTransaction)
         return self.w3_http.eth.wait_for_transaction_receipt(tx_hash)
 
     def get_chat_signature(self, chat_id):
@@ -133,7 +133,7 @@ class InfuraHandler:
                 print(f"Estimated cost: {self.w3_http.from_wei(tx['gasPrice'] * tx['gas'], 'ether')} ETH")
                 
                 signed_tx = self.w3_http.eth.account.sign_transaction(tx, Config.ETHEREUM_PRIVATE_KEY)
-                tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.raw_transaction)
+                tx_hash = self.w3_http.eth.send_raw_transaction(signed_tx.rawTransaction)
                 
                 # Wait for transaction receipt with timeout
                 tx_receipt = self.w3_http.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
