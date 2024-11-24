@@ -40,7 +40,7 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config.from_object('config.Config')
 
 # SocketIO Setup
-socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False)
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", manage_session=False, logger=True, engineio_logger=True)
 
 mail = Mail(app)
 
@@ -78,10 +78,15 @@ serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 IPFS_API = f'http://{Config.EC2_PUBLIC_IP}:8080/api/v0'
 
 def create_database_if_not_exists(app):
-    engine = db.create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
-    if not database_exists(engine.url):
-        create_database(engine.url)
-    print(f"Database {engine.url.database} {'exists' if database_exists(engine.url) else 'created'}")
+    try:
+        engine = db.create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
+        if not database_exists(engine.url):
+            create_database(engine.url)
+        print(f"Database {engine.url.database} {'exists' if database_exists(engine.url) else 'created'}")
+        return True
+    except Exception as e:
+        print(f"Error creating database: {str(e)}")
+        return False
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -884,8 +889,8 @@ def handle_reaction(data):
         'user_id': user_id
     }, room=room)
 
-if __name__ == '__main__':
-    with app.app_context():
-        create_database_if_not_exists(app)
-        db.create_all()
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+#if __name__ == '__main__':
+#    with app.app_context():
+#        create_database_if_not_exists(app)
+#        db.create_all()
+#    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
