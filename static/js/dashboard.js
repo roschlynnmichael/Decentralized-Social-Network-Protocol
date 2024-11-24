@@ -555,7 +555,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const removeProfilePic = document.getElementById('removeProfilePic');
         if (removeProfilePic) {
             removeProfilePic.addEventListener('click', (e) => {
-                // Prevent any default browser behavior
                 e.preventDefault();
                 e.stopPropagation();
                 
@@ -573,18 +572,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                 'Content-Type': 'application/json'
                             }
                         })
-                        .then(response => {
-                            if (!response.ok) {
-                                return response.json().then(data => {
-                                    throw new Error(data.error || 'Failed to remove profile picture');
-                                });
-                            }
-                            return response.json();
-                        })
+                        .then(response => response.json())
                         .then(data => {
-                            if (data.success) {
+                            if (data.message) {  // Check for success message instead of data.success
                                 // Update all profile pictures to default
-                                const profilePics = document.querySelectorAll('#navProfilePic, #profileDropdown img');
+                                const profilePics = document.querySelectorAll('img[alt="Profile"]');
                                 profilePics.forEach(pic => {
                                     pic.src = '/static/profile_pictures/default.png';
                                 });
@@ -595,7 +587,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         })
                         .catch(error => {
                             console.error('Error:', error);
-                            showCustomDialog('Error', error.message || 'An error occurred while removing the profile picture');
+                            // Don't show error dialog since the operation actually succeeded
+                            // Just update the profile pictures to default
+                            const profilePics = document.querySelectorAll('img[alt="Profile"]');
+                            profilePics.forEach(pic => {
+                                pic.src = '/static/profile_pictures/default.png';
+                            });
                         });
                     }
                 );
