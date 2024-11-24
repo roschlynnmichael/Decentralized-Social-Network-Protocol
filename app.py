@@ -317,6 +317,13 @@ def activate(token):
     else:
         return jsonify({"error": "No user found with that email address."}), 404
 
+@app.route('/')
+def index():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    else:
+        return redirect(url_for('login'))
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
