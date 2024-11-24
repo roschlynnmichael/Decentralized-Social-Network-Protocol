@@ -31,8 +31,8 @@ class Config:
     #NGINX_USERNAME = 'roschlynnmichael'
     #NGINX_PASSWORD = 'Dsouza3191@'
     MAX_IPFS_LENGTH = 250 * 1024 * 1024
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    #SESSION_COOKIE_SECURE = True
+    #CSRF_COOKIE_SECURE = True
 
     #Upload Folder Configuration
     UPLOAD_FOLDER = os.path.join('static', 'profile_pictures')
