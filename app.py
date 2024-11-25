@@ -6,7 +6,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask import current_app, session
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
-from python_scripts.sql_models.models import db, User, FriendRequest, Group, GroupMember
+from python_scripts.sql_models.models import db, User, FriendRequest, Group, GroupMember, Message
 from python_scripts.handlers.p2p_socket_handler import P2PSocketHandler
 from python_scripts.handlers.message_handler import MessageHandler
 from python_scripts.handlers.ipfs_handler import IPFSHandler
@@ -1265,42 +1265,35 @@ def on_join(data):
         print(f"User {current_user.username} joined room: {room}")
 
 @socketio.on('message')
+@login_required
 def handle_message(data):
-    try:
-        room = data.get('room')
-        message = data.get('message') or data.get('content')
-        
-        if not room or not message:
-            return
-            
-        community_id = int(room.replace('community_', ''))
-        
-        # Get or create DHT for this community
-        dht = active_group_dhts.get(community_id)
-        if not dht:
-            dht = GroupDHT(community_id)
-            port = P2PSocketHandler.find_free_port()
-            dht.add_member(current_user.id, SYSTEM_IP, port)
-            active_group_dhts[community_id] = dht
-            
-        # Create message data
-        message_data = {
-            'username': current_user.username,
-            'content': message,
-            'message': message,
-            'timestamp': datetime.now().isoformat(),
-            'sender_id': current_user.id
-        }
-        
-        # Store in DHT
-        dht.store_message(message_data)
-        
-        print(f"Emitting message to room {room}: {message_data}")
-        emit('message', message_data, to=room)
-        
-    except Exception as e:
-        print(f"Error handling message: {str(e)}")
-        emit('error', {'message': str(e)})
+    room = data.get('room')
+    if not room or not room.startswith('community_'):
+        return
+    
+    community_id = int(room.split('_')[1])
+    
+    message_data = {
+        'username': current_user.username,
+        'content': data.get('content'),
+        'message': data.get('message'),
+        'timestamp': datetime.utcnow().isoformat(),
+        'sender_id': current_user.id,
+        'file_info': data.get('fileInfo')
+    }
+    
+    # Save to database
+    message = Message(
+        community_id=community_id,
+        sender_id=current_user.id,
+        username=current_user.username,
+        content=data.get('content'),
+        file_info=data.get('fileInfo')
+    )
+    db.session.add(message)
+    db.session.commit()
+    
+    emit('message', message_data, room=room)
 
 @socketio.on('connect')
 def handle_connect(auth=None):
@@ -1344,37 +1337,29 @@ def handle_join_community(data):
         emit('error', {'message': str(e)})
 
 @socketio.on('get_message_history')
-def handle_get_history(data):
-    try:
-        community_id = data.get('community_id')
-        if not community_id:
-            return
-            
-        # Get or create the DHT for this community
-        dht = active_group_dhts.get(community_id)
-        if not dht:
-            dht = GroupDHT(community_id)
-            port = P2PSocketHandler.find_free_port()
-            dht.add_member(current_user.id, SYSTEM_IP, port)
-            active_group_dhts[community_id] = dht
-            
-        # Get all messages from DHT
-        messages = dht.get_messages()
+@login_required
+def handle_get_message_history(data):
+    community_id = data.get('community_id')
+    if not community_id:
+        return
         
-        # Sort messages by timestamp
-        messages.sort(key=lambda x: x['timestamp'])
+    messages = Message.query.filter_by(community_id=community_id)\
+        .order_by(Message.timestamp.asc())\
+        .all()
         
-        print(f"Sending message history for community {community_id}: {messages}")
-        
-        # Send message history to client
-        emit('message_history', {
-            'community_id': community_id,
-            'messages': messages
-        })
-        
-    except Exception as e:
-        print(f"Error getting message history: {str(e)}")
-        emit('error', {'message': str(e)})
+    message_history = [{
+        'username': msg.username,
+        'content': msg.content,
+        'message': msg.content,
+        'timestamp': msg.timestamp.isoformat(),
+        'sender_id': msg.sender_id,
+        'fileInfo': msg.file_info
+    } for msg in messages]
+    
+    emit('message_history', {
+        'community_id': community_id,
+        'messages': message_history
+    })
 
 @socketio.on('join_community')
 def handle_join_community(data):
