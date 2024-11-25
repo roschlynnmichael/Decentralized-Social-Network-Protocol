@@ -63,16 +63,64 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load initial communities
     loadCommunities();
-
-    // File sharing setup
-    const fileButton = document.getElementById('fileButton');
-    const fileInput = document.getElementById('communityFileInput');
-    
-    if (fileButton && fileInput) {
-        fileButton.addEventListener('click', () => fileInput.click());
-        fileInput.addEventListener('change', handleFileSelect);
-    }
 });
+
+// Utility functions for file handling
+window.communityHelpers = {
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    },
+
+    getFileIcon(mimeType) {
+        if (!mimeType) return 'fa-file';
+        if (mimeType.startsWith('image/')) return 'fa-file-image';
+        if (mimeType.startsWith('video/')) return 'fa-file-video';
+        if (mimeType.startsWith('audio/')) return 'fa-file-audio';
+        if (mimeType.includes('pdf')) return 'fa-file-pdf';
+        if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word';
+        if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fa-file-excel';
+        if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-archive';
+        return 'fa-file';
+    },
+
+    showUploadStatus(filename, progress) {
+        let statusContainer = document.getElementById('uploadStatusContainer');
+        if (!statusContainer) {
+            statusContainer = document.createElement('div');
+            statusContainer.id = 'uploadStatusContainer';
+            statusContainer.className = 'fixed bottom-4 right-4 space-y-2 z-50';
+            document.body.appendChild(statusContainer);
+        }
+
+        let statusElement = document.getElementById(`upload-${filename}`);
+        if (!statusElement) {
+            statusElement = document.createElement('div');
+            statusElement.id = `upload-${filename}`;
+            statusElement.className = 'bg-white shadow-lg rounded-lg p-4 mb-2';
+            statusElement.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-700">Uploading: ${filename}</span>
+                </div>
+                <div class="h-2 bg-gray-200 rounded-full">
+                    <div class="h-full bg-blue-600 rounded-full transition-all duration-300" style="width: ${progress}%"></div>
+                </div>
+            `;
+            statusContainer.appendChild(statusElement);
+        } else {
+            const progressBar = statusElement.querySelector('.bg-blue-600');
+            if (progressBar) progressBar.style.width = `${progress}%`;
+        }
+    },
+
+    removeUploadStatus(filename) {
+        const element = document.getElementById(`upload-${filename}`);
+        if (element) element.remove();
+    }
+};
 
 // Community Management Functions
 async function loadCommunities() {
@@ -169,10 +217,15 @@ async function loadCommunityMembers(communityId) {
             membersList.appendChild(memberElement);
         });
 
-        // Show/hide Add Members button based on admin status
+        // Show/hide admin-only buttons based on admin status
         const addMembersBtn = document.getElementById('addMembersBtn');
+        const clearChatBtn = document.getElementById('clearChatBtn');
+        
         if (addMembersBtn) {
             addMembersBtn.classList.toggle('hidden', !isAdmin);
+        }
+        if (clearChatBtn) {
+            clearChatBtn.classList.toggle('hidden', !isAdmin);
         }
         
     } catch (error) {
@@ -200,7 +253,7 @@ function displayMessage(data) {
     // Handle file messages
     if (data.fileInfo) {
         const fileInfo = data.fileInfo;
-        const fileSize = fileInfo.size ? formatFileSize(fileInfo.size) : '';
+        const fileSize = fileInfo.size ? window.communityHelpers.formatFileSize(fileInfo.size) : '';
         
         contentHtml = `
             <div class="flex items-center space-x-2 bg-gray-50 p-2 rounded hover:bg-gray-100">
@@ -210,7 +263,7 @@ function displayMessage(data) {
                    data-filename="${fileInfo.name}"
                    data-size="${fileInfo.size}"
                    onclick="event.preventDefault();">
-                    <i class="fas ${getFileIcon(fileInfo.type)}"></i>
+                    <i class="fas ${window.communityHelpers.getFileIcon(fileInfo.type)}"></i>
                     <span class="flex-1">${fileInfo.name}</span>
                     <span class="text-sm text-gray-500">${fileSize}</span>
                     <i class="fas fa-download"></i>
@@ -228,78 +281,19 @@ function displayMessage(data) {
                 </div>
             </div>
             <div class="ml-3 flex-1">
-                <p class="font-medium text-sm">${username}</p>
-                ${contentHtml}
-                <p class="text-xs text-gray-400 mt-1">${timestamp}</p>
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-gray-900">${username}</span>
+                    <span class="text-sm text-gray-500">${timestamp}</span>
+                </div>
+                <div class="mt-1">
+                    ${contentHtml}
+                </div>
             </div>
         </div>
     `;
     
-    // Add click event listener for file downloads
-    if (data.fileInfo) {
-        const fileLink = messageElement.querySelector('.file-link');
-        fileLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            const hash = fileLink.getAttribute('data-hash');
-            const filename = fileLink.getAttribute('data-filename');
-            if (window.fileSharing) {
-                window.fileSharing.handleFileDownload(hash, filename, currentCommunityId);
-            } else {
-                console.error('File sharing handler not initialized');
-            }
-        });
-    }
-    
     messageArea.appendChild(messageElement);
     messageArea.scrollTop = messageArea.scrollHeight;
-}
-
-// Helper function to format file sizes
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// Helper function to get appropriate file icon
-function getFileIcon(mimeType) {
-    if (!mimeType) return 'fa-file';
-    
-    if (mimeType.startsWith('image/')) return 'fa-file-image';
-    if (mimeType.startsWith('video/')) return 'fa-file-video';
-    if (mimeType.startsWith('audio/')) return 'fa-file-audio';
-    if (mimeType.includes('pdf')) return 'fa-file-pdf';
-    if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word';
-    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fa-file-excel';
-    if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-archive';
-    
-    return 'fa-file';
-}
-
-// Helper function to format file sizes
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// Helper function to get appropriate file icon
-function getFileIcon(mimeType) {
-    if (!mimeType) return 'fa-file';
-    
-    if (mimeType.startsWith('image/')) return 'fa-file-image';
-    if (mimeType.startsWith('video/')) return 'fa-file-video';
-    if (mimeType.startsWith('audio/')) return 'fa-file-audio';
-    if (mimeType.includes('pdf')) return 'fa-file-pdf';
-    if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word';
-    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fa-file-excel';
-    if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-archive';
-    
-    return 'fa-file';
 }
 
 // Event Handlers
@@ -350,10 +344,17 @@ function handleMessageSubmit(e) {
 }
 
 function handleMessageHistory(data) {
-    if (data.community_id === currentCommunityId && messageArea) {
-        messageArea.innerHTML = '';
-        data.messages.forEach(displayMessage);
-        messageArea.scrollTop = messageArea.scrollHeight;
+    if (!messageArea) return;
+    
+    messageArea.innerHTML = '';
+    
+    if (data.messages && Array.isArray(data.messages)) {
+        data.messages.forEach(msg => {
+            displayMessage({
+                ...msg,
+                timestamp: new Date(msg.timestamp)
+            });
+        });
     }
 }
 
@@ -541,40 +542,6 @@ async function handleFileSelect(e) {
 
     // Clear the input
     e.target.value = '';
-}
-
-function showUploadStatus(filename, progress) {
-    let statusContainer = document.getElementById('uploadStatusContainer');
-    if (!statusContainer) {
-        statusContainer = document.createElement('div');
-        statusContainer.id = 'uploadStatusContainer';
-        statusContainer.className = 'fixed bottom-4 right-4 space-y-2 z-50';
-        document.body.appendChild(statusContainer);
-    }
-
-    let statusElement = document.getElementById(`upload-${filename}`);
-    if (!statusElement) {
-        statusElement = document.createElement('div');
-        statusElement.id = `upload-${filename}`;
-        statusElement.className = 'bg-white shadow-lg rounded-lg p-4 mb-2';
-        statusElement.innerHTML = `
-            <div class="flex items-center justify-between mb-2">
-                <span class="text-sm font-medium text-gray-700">Uploading: ${filename}</span>
-            </div>
-            <div class="h-2 bg-gray-200 rounded-full">
-                <div class="h-full bg-blue-600 rounded-full transition-all duration-300" style="width: ${progress}%"></div>
-            </div>
-        `;
-        statusContainer.appendChild(statusElement);
-    } else {
-        const progressBar = statusElement.querySelector('.bg-blue-600');
-        if (progressBar) progressBar.style.width = `${progress}%`;
-    }
-}
-
-function removeUploadStatus(filename) {
-    const element = document.getElementById(`upload-${filename}`);
-    if (element) element.remove();
 }
 
 async function clearCommunityChat() {

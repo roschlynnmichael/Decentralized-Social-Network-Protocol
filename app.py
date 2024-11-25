@@ -1390,6 +1390,17 @@ def create_community():
 @login_required
 def clear_community_chat(community_id):
     try:
+        # Check if user is admin of the community
+        member = GroupMember.query.filter_by(
+            group_id=community_id,
+            user_id=current_user.id
+        ).first()
+        
+        if not member or member.role != 'admin':
+            return jsonify({
+                'error': 'Unauthorized. Only community admins can clear chat.'
+            }), 403
+        
         # Delete messages for this community
         Message.query.filter_by(community_id=community_id).delete()
         db.session.commit()

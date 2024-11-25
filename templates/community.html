@@ -150,15 +150,13 @@
                         <div class="relative">
                             <button type="button" 
                                     id="fileButton"
-                                    class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200"
-                                    onclick="document.getElementById('communityFileInput').click()">
+                                    class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200">
                                 <i class="fas fa-paperclip"></i>
                             </button>
                             <input type="file" 
                                    id="communityFileInput" 
                                    class="hidden" 
-                                   multiple
-                                   onchange="window.fileSharing.handleFileSelect(event)">
+                                   multiple>
                         </div>
                         <input type="text" 
                                id="messageInput" 
@@ -294,7 +292,7 @@
             
             // Wait a brief moment to ensure Socket.IO is initialized
             setTimeout(() => {
-                if (socket) {
+                if (socket && !window.fileSharing) {
                     window.fileSharing = new CommunityFileSharing(socket);
                 } else {
                     console.error('Socket not initialized');
