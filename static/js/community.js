@@ -1,6 +1,30 @@
 document.addEventListener('DOMContentLoaded', () => {
     const socket = io();
     
+    // Listen for community stats updates
+    socket.on('community_stats_update', (data) => {
+        updateCommunityStats(data);
+    });
+
+    function updateCommunityStats(data) {
+        // Update the sidebar item
+        const sidebarItem = document.querySelector(`.community-item[data-community-id="${data.community_id}"]`);
+        if (sidebarItem) {
+            const statsElement = sidebarItem.querySelector('.text-sm.text-gray-500');
+            if (statsElement) {
+                statsElement.textContent = `${data.member_count} ${data.member_count === 1 ? 'member' : 'members'} • ${data.online_count} online`;
+            }
+        }
+
+        // Update the header if this is the current community
+        if (currentCommunityId === data.community_id) {
+            const headerStatsElement = document.querySelector('#currentCommunityStats');
+            if (headerStatsElement) {
+                headerStatsElement.textContent = `${data.online_count} online • ${data.member_count} members`;
+            }
+        }
+    }
+
     // Initialize chat handlers
     const messageForm = document.getElementById('messageForm');
     const messageInput = document.getElementById('messageInput');
@@ -135,6 +159,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // Clear message area
             if (messageArea) {
                 messageArea.innerHTML = '';
+            }
+            
+            // Update the header stats when joining
+            const community = communities.find(c => c.id === communityId);
+            if (community) {
+                const headerStatsElement = document.querySelector('#currentCommunityStats');
+                if (headerStatsElement) {
+                    headerStatsElement.textContent = `${community.online_count} online • ${community.member_count} members`;
+                }
             }
         }
     }

@@ -38,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 upload_executor = ThreadPoolExecutor(max_workers=5)
 upload_status = {}
 active_group_dhts = {}
+active_users = {}
 
 load_dotenv()
 
@@ -628,12 +629,21 @@ def get_chat_history(friend_id):
         }), 500
 
 @socketio.on('connect')
-def handle_connect():
-    app.logger.debug(f"Client connected: {request.sid}")
+def handle_connect(auth=None):
+    if current_user.is_authenticated:
+        if current_user.id not in active_users:
+            active_users[current_user.id] = set()
+        active_users[current_user.id].add(request.sid)
+        update_community_stats()
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    app.logger.debug(f"Client disconnected: {request.sid}")
+    if current_user.is_authenticated:
+        if current_user.id in active_users:
+            active_users[current_user.id].discard(request.sid)
+            if not active_users[current_user.id]:
+                active_users.pop(current_user.id, None)
+            update_community_stats()
 
 @socketio.on('join')
 def on_join(data):
@@ -1004,7 +1014,6 @@ def handle_group_message(data):
 @login_required
 def get_communities():
     try:
-        # Get all communities the user is a member of
         communities = Group.query.join(GroupMember).filter(
             GroupMember.user_id == current_user.id
         ).all()
@@ -1013,11 +1022,22 @@ def get_communities():
             'id': c.id,
             'name': c.name,
             'member_count': len(c.members),
-            'online_count': 0,  # You can implement real-time tracking later
+            'online_count': len([m for m in c.members if m.id in active_users]),
             'created_at': c.created_at.isoformat()
         } for c in communities])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
+def update_community_stats():
+    # Get all communities with their updated stats
+    communities = Group.query.all()
+    for community in communities:
+        online_count = len([m for m in community.members if m.id in active_users])
+        socketio.emit('community_stats_update', {
+            'community_id': community.id,
+            'member_count': len(community.members),
+            'online_count': online_count
+        }, to=None)
 
 @app.route('/api/communities/create', methods=['POST'])
 @login_required
@@ -1113,3 +1133,20 @@ def handle_message(data):
         'content': message,
         'timestamp': datetime.now().isoformat()
     }, room=room, broadcast=True)
+
+@socketio.on('connect')
+def handle_connect(auth=None):
+    if current_user.is_authenticated:
+        if current_user.id not in active_users:
+            active_users[current_user.id] = set()
+        active_users[current_user.id].add(request.sid)
+        update_community_stats()
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    if current_user.is_authenticated:
+        if current_user.id in active_users:
+            active_users[current_user.id].discard(request.sid)
+            if not active_users[current_user.id]:
+                active_users.pop(current_user.id, None)
+            update_community_stats()
