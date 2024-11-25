@@ -13,7 +13,7 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)  # Increased length to 255
-    eth_address = db.Column(db.String(42), unique=True, nullable=False)
+    eth_address = db.Column(db.String(42), unique=True, nullable=True)
     is_active = db.Column(db.Boolean, default=False)
     profile_picture = db.Column(db.String(255), default='default.png', nullable=True)
     socket_host = db.Column(db.String(255), nullable=True)
@@ -58,6 +58,7 @@ class Group(db.Model):
     __tablename__ = 'groups'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True) 
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Change 'users.id' to 'user.id'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     

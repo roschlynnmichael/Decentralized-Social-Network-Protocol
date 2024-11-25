@@ -125,10 +125,14 @@ def send_email(subject, body, sender, recipients, password):
     msg['Subject'] = subject
     msg['From'] = sender
     msg['To'] = ', '.join(recipients)
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
-       smtp_server.login(sender, password)
-       smtp_server.sendmail(sender, recipients, msg.as_string())
-    print("Message sent!")
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
+            smtp_server.login(sender, password)
+            smtp_server.sendmail(sender, recipients, msg.as_string())
+        print("Message sent!")
+    except Exception as e:
+        print(f"Failed to send email: {str(e)}")
+        raise
 
 # Function to generate verification code
 def generate_verification_code():
@@ -170,11 +174,9 @@ def register():
         }), 201
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
-        db.session.delete(user)
-        db.session.commit()
         return jsonify({
-            "error": "Registration failed. Unable to send activation email. Please try again later.",
-        }), 500
+            "message": "Registration successful but email verification failed. Please contact support.",
+        }), 201
 
 @app.route('/reset_password_request', methods=['GET', 'POST'])
 def reset_password_request():
@@ -1029,18 +1031,35 @@ def handle_group_message(data):
 @login_required
 def get_communities():
     try:
-        communities = Group.query.join(GroupMember).filter(
+        # Get all groups where the current user is a member
+        communities = db.session.query(Group).join(
+            GroupMember,
+            Group.id == GroupMember.group_id
+        ).filter(
             GroupMember.user_id == current_user.id
         ).all()
         
-        return jsonify([{
-            'id': c.id,
-            'name': c.name,
-            'member_count': len(c.members),
-            'online_count': len([m for m in c.members if m.id in active_users]),
-            'created_at': c.created_at.isoformat()
-        } for c in communities])
+        # Format the response
+        community_list = []
+        for community in communities:
+            # Count online members
+            online_members = sum(1 for member in community.members 
+                               if member.id in active_users)
+            
+            community_list.append({
+                'id': community.id,
+                'name': community.name,
+                'description': community.description,
+                'member_count': len(community.members),
+                'online_count': online_members,
+                'created_at': community.created_at.isoformat() if community.created_at else None
+            })
+        
+        return jsonify(community_list)
+        
     except Exception as e:
+        app.logger.error(f"Error getting communities: {str(e)}")
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
     
 def update_community_stats():
@@ -1052,50 +1071,7 @@ def update_community_stats():
             'community_id': community.id,
             'member_count': len(community.members),
             'online_count': online_count
-        }, to=None)
-
-@app.route('/api/communities/create', methods=['POST'])
-@login_required
-def create_community():
-    try:
-        data = request.json
-        name = data.get('name')
-        member_ids = data.get('members', [])
-        
-        # Create new community
-        community = Group(
-            name=name,
-            creator_id=current_user.id
-        )
-        
-        # Add creator as member
-        community.members.append(current_user)
-        
-        # Add other members
-        for user_id in member_ids:
-            user = User.query.get(user_id)
-            if user and user != current_user:
-                community.members.append(user)
-        
-        db.session.add(community)
-        db.session.commit()
-        
-        # Create DHT for community
-        dht = GroupDHT(community.id)
-        active_group_dhts[community.id] = dht
-        
-        return jsonify({
-            'success': True,
-            'community': {
-                'id': community.id,
-                'name': community.name,
-                'member_count': len(community.members),
-                'created_at': community.created_at.isoformat()
-            }
-        })
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500        
+        }, to=None)      
 
 @app.route('/api/users/available', methods=['GET'])
 @login_required
@@ -1109,6 +1085,151 @@ def get_available_users():
             'email': user.email
         } for user in users])
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/communities/<int:community_id>/members', methods=['GET'])
+@login_required
+def get_community_members(community_id):
+    try:
+        members = db.session.query(GroupMember, User).join(
+            User, GroupMember.user_id == User.id
+        ).filter(
+            GroupMember.group_id == community_id
+        ).all()
+        
+        return jsonify([{
+            'user_id': member.GroupMember.user_id,
+            'username': member.User.username,
+            'role': member.GroupMember.role,
+            'joined_at': member.GroupMember.joined_at.isoformat()
+        } for member in members])
+    except Exception as e:
+        app.logger.error(f"Error getting community members: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/communities/<int:community_id>/members', methods=['POST'])
+@login_required
+def add_community_member(community_id):
+    try:
+        # Check if current user is admin
+        is_admin = GroupMember.query.filter_by(
+            group_id=community_id, 
+            user_id=current_user.id, 
+            role='admin'
+        ).first()
+        
+        if not is_admin:
+            return jsonify({'error': 'Unauthorized'}), 403
+            
+        data = request.json
+        user_id = data.get('user_id')
+        
+        # Check if user exists and isn't already a member
+        if not User.query.get(user_id):
+            return jsonify({'error': 'User not found'}), 404
+            
+        if GroupMember.query.filter_by(group_id=community_id, user_id=user_id).first():
+            return jsonify({'error': 'User is already a member'}), 400
+            
+        new_member = GroupMember(
+            group_id=community_id,
+            user_id=user_id,
+            role='member'
+        )
+        db.session.add(new_member)
+        db.session.commit()
+        
+        update_community_stats()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/communities/<int:community_id>/members/<int:user_id>', methods=['DELETE'])
+@login_required
+def remove_community_member(community_id, user_id):
+    try:
+        # Check if current user is admin
+        is_admin = GroupMember.query.filter_by(
+            group_id=community_id, 
+            user_id=current_user.id, 
+            role='admin'
+        ).first()
+        
+        if not is_admin:
+            return jsonify({'error': 'Unauthorized'}), 403
+            
+        member = GroupMember.query.filter_by(
+            group_id=community_id, 
+            user_id=user_id
+        ).first()
+        
+        if not member:
+            return jsonify({'error': 'Member not found'}), 404
+            
+        # Prevent removing the last admin
+        if member.role == 'admin':
+            admin_count = GroupMember.query.filter_by(
+                group_id=community_id, 
+                role='admin'
+            ).count()
+            if admin_count <= 1:
+                return jsonify({'error': 'Cannot remove the last admin'}), 400
+        
+        db.session.delete(member)
+        db.session.commit()
+        
+        update_community_stats()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/communities', methods=['POST'])
+@login_required
+def create_community():
+    try:
+        data = request.json
+        new_community = Group(
+            name=data['name'],
+            description=data.get('description', ''),
+            creator_id=current_user.id,  # Make sure to set the creator_id
+            created_at=datetime.utcnow()
+        )
+        db.session.add(new_community)
+        db.session.flush()  # Get the new community ID
+        
+        # Add creator as admin member
+        admin_member = GroupMember(
+            group_id=new_community.id,
+            user_id=current_user.id,
+            role='admin'  # Set creator as admin
+        )
+        db.session.add(admin_member)
+        
+        # Add other members if provided
+        for user_id in data.get('members', []):
+            if user_id != current_user.id:  # Skip creator as they're already added
+                member = GroupMember(
+                    group_id=new_community.id,
+                    user_id=user_id,
+                    role='member'
+                )
+                db.session.add(member)
+        
+        db.session.commit()
+        
+        # Return the newly created community data
+        return jsonify({
+            'id': new_community.id,
+            'name': new_community.name,
+            'description': new_community.description,
+            'member_count': len(data.get('members', [])) + 1,  # Include creator
+            'online_count': 1,  # Creator is online
+            'created_at': new_community.created_at.isoformat()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error creating community: {str(e)}")
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @socketio.on('typing')

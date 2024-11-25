@@ -7,7 +7,7 @@ load_dotenv()
 class Config:
     DB_PASSWORD = quote('Dsouza@3191')
     SECRET_KEY = os.urandom(32)
-    SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://p2p_user:{DB_PASSWORD}@192.168.8.208:3306/p2p_social_network'
+    SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://p2p_user:{DB_PASSWORD}@192.168.1.6:3306/p2p_social_network'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     #Mail Server Configuration
@@ -16,10 +16,10 @@ class Config:
     MAIL_USE_TLS = False
     MAIL_USE_SSL = True
     MAIL_USERNAME = 'cnetworks361@gmail.com'
-    MAIL_PASSWORD = 'etap vwie zggy iruk'
+    MAIL_PASSWORD = 'kqzp gmfj momu qnlc'
 
     #AWS EC2 Configuration
-    EC2_PUBLIC_IP = '192.168.8.208'
+    EC2_PUBLIC_IP = '192.168.1.6'
     #NGINX_USERNAME = 'roschlynnmichael'
     #NGINX_PASSWORD = 'Dsouza3191@'
     MAX_IPFS_LENGTH = 250 * 1024 * 1024
@@ -48,7 +48,7 @@ class Config:
     ENCRYPTION_KEY = b'klMnjhfScy3lsuzmSu5yaxhzeortgmCOBI2XOdaullo='
 
     # IPFS Configuration
-    IPFS_API_HOST = '192.168.8.208'  # Your Windows Server 2022 IP
+    IPFS_API_HOST = '192.168.1.6'  # Your Windows Server 2022 IP
     IPFS_API_PORT = 5001
     IPFS_GATEWAY_PORT = 8080
     IPFS_TIMEOUT = 30  # Increased timeout for network operations

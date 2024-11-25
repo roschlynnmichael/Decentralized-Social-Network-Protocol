@@ -1,212 +1,429 @@
+// Global variables
+let socket;
+let communities = [];
+let currentCommunityId = null;
+let messageArea;
+let messageForm;
+let messageInput;
+
+// Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    const socket = io();
-    let communities = [];
-    let currentCommunityId = null;
+    // Initialize Socket.IO
+    socket = io();
     
-    // Listen for community stats updates
-    socket.on('community_stats_update', (data) => {
-        updateCommunityStats(data);
+    // Get DOM elements
+    messageArea = document.getElementById('messageArea');
+    messageForm = document.getElementById('messageForm');
+    messageInput = document.getElementById('messageInput');
+    const createCommunityBtn = document.getElementById('createCommunityBtn');
+    const createCommunityModal = document.getElementById('createCommunityModal');
+    const createCommunityForm = document.getElementById('createCommunityForm');
+    const addMembersBtn = document.getElementById('addMembersBtn');
+    const addMembersModal = document.getElementById('addMembersModal');
+    const addMembersForm = document.getElementById('addMembersForm');
+
+    // Socket event listeners
+    socket.on('connect', () => console.log('Socket connected'));
+    socket.on('message', displayMessage);
+    socket.on('message_history', handleMessageHistory);
+    socket.on('community_stats_update', updateCommunityStats);
+
+    // UI event listeners
+    createCommunityBtn.addEventListener('click', () => {
+        createCommunityModal.classList.remove('hidden');
+        loadAvailableUsers();
     });
 
-    function updateCommunityStats(data) {
-        // Update the sidebar item
-        const sidebarItem = document.querySelector(`.community-item[data-community-id="${data.community_id}"]`);
-        if (sidebarItem) {
-            const statsElement = sidebarItem.querySelector('.text-sm.text-gray-500');
-            if (statsElement) {
-                statsElement.textContent = `${data.member_count} ${data.member_count === 1 ? 'member' : 'members'} • ${data.online_count} online`;
-            }
-        }
-
-        // Update the header if this is the current community
-        if (currentCommunityId === data.community_id) {
-            const headerStatsElement = document.querySelector('#currentCommunityStats');
-            if (headerStatsElement) {
-                headerStatsElement.textContent = `${data.online_count} online • ${data.member_count} members`;
-            }
-        }
-    }
-
-    function displayMessage(data) {
-        if (!messageArea) {
-            console.error('Message area not found');
-            return;
-        }
-        
-        const messageElement = document.createElement('div');
-        messageElement.className = 'message p-3 bg-white rounded-lg shadow-sm mb-3';
-        
-        const content = data.content || data.message || '';
-        const username = data.username || 'Unknown User';
-        const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-        
-        messageElement.innerHTML = `
-            <div class="flex items-start">
-                <div class="flex-shrink-0">
-                    <div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm">
-                        ${username[0].toUpperCase()}
-                    </div>
-                </div>
-                <div class="ml-3">
-                    <p class="font-medium text-sm">${username}</p>
-                    <p class="text-gray-600">${content}</p>
-                    <p class="text-xs text-gray-400 mt-1">${timestamp}</p>
-                </div>
-            </div>
-        `;
-        
-        messageArea.appendChild(messageElement);
-        messageArea.scrollTop = messageArea.scrollHeight;
-    }
-
-    // Initialize chat handlers
-    const messageForm = document.getElementById('messageForm');
-    const messageInput = document.getElementById('messageInput');
-    const messageArea = document.getElementById('messageArea');
-
-    // Function to load communities
-    async function loadCommunities() {
-        try {
-            const response = await fetch('/api/communities');
-            if (!response.ok) {
-                throw new Error('Failed to fetch communities');
-            }
-            
-            communities = await response.json();
-            const communitiesList = document.querySelector('.communities-list');
-            
-            if (!communitiesList) {
-                console.error('Communities list element not found');
-                return;
-            }
-            
-            communitiesList.innerHTML = '';
-            
-            communities.forEach(community => {
-                const communityElement = document.createElement('div');
-                communityElement.className = 'community-item p-3 hover:bg-gray-50 cursor-pointer rounded-lg transition-colors';
-                communityElement.dataset.communityId = community.id;
-                
-                communityElement.innerHTML = `
-                    <div class="flex items-center space-x-3">
-                        <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white">
-                            <i class="fas fa-users"></i>
-                        </div>
-                        <div>
-                            <h3 class="font-medium">${community.name}</h3>
-                            <p class="text-sm text-gray-500">
-                                ${community.member_count} ${community.member_count === 1 ? 'member' : 'members'} • ${community.online_count} online
-                            </p>
-                        </div>
-                    </div>
-                `;
-                
-                communityElement.addEventListener('click', () => {
-                    joinCommunity(community.id);
-                });
-                
-                communitiesList.appendChild(communityElement);
-            });
-        } catch (error) {
-            console.error('Error loading communities:', error);
-        }
-    }
-
-    // Update the socket event handlers
-    socket.on('connect', () => {
-        console.log('Socket connected');
-    });
-
-    // Add message handler
-    socket.on('message', (data) => {
-        console.log('Received message:', data);
-        displayMessage(data);
-    });
-
-    // Handle message form submission
+    createCommunityForm.addEventListener('submit', handleCreateCommunity);
+    
     if (messageForm) {
-        messageForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const message = messageInput.value.trim();
-            
-            if (message && currentCommunityId) {
-                console.log('Sending message:', message);
-                socket.emit('message', {
-                    room: `community_${currentCommunityId}`,
-                    message: message,
-                    content: message
-                });
-                
-                messageInput.value = '';
-            }
-        });
+        messageForm.addEventListener('submit', handleMessageSubmit);
     }
 
-    // Join community function
-    function joinCommunity(communityId) {
-        console.log('Joining community:', communityId);
-        if (currentCommunityId !== communityId) {
-            if (currentCommunityId) {
-                socket.emit('leave', { room: `community_${currentCommunityId}` });
-            }
-            currentCommunityId = communityId;
-            
-            // Clear message area
-            if (messageArea) {
-                messageArea.innerHTML = '';
-            }
-    
-            // Join the Socket.IO room and request message history
-            socket.emit('join_community', { 
-                community_id: communityId 
-            });
-    
-            socket.emit('get_message_history', { 
-                community_id: communityId 
-            });
-    
-            // Update UI
-            document.querySelectorAll('.community-item').forEach(item => {
-                const isSelected = item.dataset.communityId === communityId.toString();
-                item.classList.toggle('bg-gray-50', isSelected);
-                
-                if (isSelected) {
-                    const communityName = item.querySelector('h3').textContent;
-                    const currentCommunityNameEl = document.getElementById('currentCommunityName');
-                    if (currentCommunityNameEl) {
-                        currentCommunityNameEl.textContent = communityName;
-                    }
+    addMembersBtn.addEventListener('click', () => {
+        addMembersModal.classList.remove('hidden');
+        loadAvailableUsersForAdd();
+    });
 
-                    // Find the community data
-                    const community = communities.find(c => c.id === communityId);
-                    if (community) {
-                        const headerStatsElement = document.querySelector('#currentCommunityStats');
-                        if (headerStatsElement) {
-                            headerStatsElement.textContent = `${community.online_count} online • ${community.member_count} members`;
-                        }
-                    }
-                }
-            });
-        }
-    }
+    addMembersForm.addEventListener('submit', handleAddMembers);
 
-    // Message history handler remains the same but now displayMessage is defined
-    socket.on('message_history', (data) => {
-        console.log('Received message history:', data);
-        if (data.community_id === currentCommunityId && messageArea) {
-            // Clear existing messages
-            messageArea.innerHTML = '';
-            
-            // Display each message in history
-            data.messages.forEach(message => {
-                displayMessage(message);
-            });
-            
-            // Scroll to bottom
-            messageArea.scrollTop = messageArea.scrollHeight;
+    // Close modal when clicking outside
+    createCommunityModal.addEventListener('click', (e) => {
+        if (e.target === createCommunityModal) {
+            createCommunityModal.classList.add('hidden');
         }
     });
 
-    // Load communities when page loads
+    addMembersModal.addEventListener('click', (e) => {
+        if (e.target === addMembersModal) {
+            addMembersModal.classList.add('hidden');
+        }
+    });
+
+    // Load initial communities
     loadCommunities();
 });
+
+// Community Management Functions
+async function loadCommunities() {
+    try {
+        const response = await fetch('/api/communities');
+        communities = await response.json();
+        
+        const communitiesList = document.querySelector('.communities-list');
+        if (!communitiesList) return;
+        
+        communitiesList.innerHTML = '';
+        
+        communities.forEach(community => {
+            const communityElement = document.createElement('div');
+            communityElement.className = 'community-item p-3 hover:bg-gray-50 rounded-lg cursor-pointer';
+            communityElement.dataset.communityId = community.id;
+            
+            communityElement.innerHTML = `
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-medium">${community.name}</h3>
+                        <p class="text-sm text-gray-500">
+                            ${community.member_count} ${community.member_count === 1 ? 'member' : 'members'} • 
+                            ${community.online_count} online
+                        </p>
+                    </div>
+                </div>
+            `;
+            
+            communityElement.addEventListener('click', () => joinCommunity(community.id));
+            communitiesList.appendChild(communityElement);
+        });
+        
+        // Join first community by default
+        if (communities.length > 0 && !currentCommunityId) {
+            joinCommunity(communities[0].id);
+        }
+    } catch (error) {
+        console.error('Error loading communities:', error);
+    }
+}
+
+async function loadCommunityMembers(communityId) {
+    try {
+        const response = await fetch(`/api/communities/${communityId}/members`);
+        
+        // Debug the response
+        console.log('Response status:', response.status);
+        const data = await response.json();
+        console.log('Response data:', data);
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load members');
+        }
+
+        const members = Array.isArray(data) ? data : [];
+        console.log('Processed members:', members);
+        
+        const currentUserId = parseInt(currentUser.id);
+        const currentUserMember = members.find(m => parseInt(m.user_id) === currentUserId);
+        const isAdmin = currentUserMember?.role === 'admin';
+        
+        console.log('Current user ID:', currentUserId);
+        console.log('Is admin?', isAdmin);
+        
+        const membersList = document.createElement('div');
+        membersList.className = 'mt-4 space-y-2';
+        
+        members.forEach(member => {
+            const memberElement = document.createElement('div');
+            memberElement.className = 'flex items-center justify-between p-2 bg-gray-50 rounded';
+            
+            memberElement.innerHTML = `
+                <div class="flex items-center space-x-2">
+                    <div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white">
+                        ${member.username ? member.username[0].toUpperCase() : '?'}
+                    </div>
+                    <span>${member.username || 'Unknown User'}</span>
+                    ${member.role === 'admin' ? 
+                        '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Admin</span>' : 
+                        '<span class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded">Member</span>'
+                    }
+                </div>
+                ${isAdmin && parseInt(member.user_id) !== currentUserId && member.role !== 'admin' ? `
+                    <button 
+                        class="px-2 py-1 text-white bg-red-500 hover:bg-red-600 rounded-lg flex items-center space-x-1" 
+                        onclick="removeMember(${communityId}, ${member.user_id})"
+                    >
+                        <i class="fas fa-times"></i>
+                        <span>Remove</span>
+                    </button>
+                ` : ''}
+            `;
+            
+            membersList.appendChild(memberElement);
+        });
+        
+        // Find and update the header
+        const header = document.querySelector('#currentCommunityHeader');
+        if (!header) {
+            console.warn('Community header not found, creating it');
+            const container = document.querySelector('.col-span-9') || document.body;
+            const newHeader = document.createElement('div');
+            newHeader.id = 'currentCommunityHeader';
+            container.prepend(newHeader);
+        }
+        
+        const existingList = document.querySelector('.members-list');
+        if (existingList) {
+            existingList.remove();
+        }
+        membersList.classList.add('members-list');
+        header.appendChild(membersList);
+        
+        // Show/hide Add Members button based on admin status
+        const addMembersBtn = document.getElementById('addMembersBtn');
+        if (addMembersBtn) {
+            addMembersBtn.classList.toggle('hidden', !isAdmin);
+        }
+        
+    } catch (error) {
+        console.error('Error loading members:', error);
+        // Show error to user in a visible location
+        const errorElement = document.createElement('div');
+        errorElement.className = 'mt-4 p-2 bg-red-100 text-red-700 rounded';
+        errorElement.textContent = 'Failed to load community members. Please try again later.';
+        
+        const container = document.querySelector('.col-span-9') || document.body;
+        container.prepend(errorElement);
+    }
+}
+// Message Handling Functions
+function displayMessage(data) {
+    if (!messageArea) return;
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = 'message p-3 bg-white rounded-lg shadow-sm mb-3';
+    
+    const content = data.content || data.message || '';
+    const username = data.username || 'Unknown User';
+    const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+    
+    messageElement.innerHTML = `
+        <div class="flex items-start">
+            <div class="flex-shrink-0">
+                <div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm">
+                    ${username[0].toUpperCase()}
+                </div>
+            </div>
+            <div class="ml-3">
+                <p class="font-medium text-sm">${username}</p>
+                <p class="text-gray-600">${content}</p>
+                <p class="text-xs text-gray-400 mt-1">${timestamp}</p>
+            </div>
+        </div>
+    `;
+    
+    messageArea.appendChild(messageElement);
+    messageArea.scrollTop = messageArea.scrollHeight;
+}
+
+// Event Handlers
+async function handleCreateCommunity(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const data = {
+        name: formData.get('name'),
+        description: formData.get('description'),
+        members: Array.from(document.getElementById('memberSelect').selectedOptions).map(option => parseInt(option.value))
+    };
+
+    try {
+        const response = await fetch('/api/communities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            createCommunityModal.classList.add('hidden');
+            e.target.reset();
+            loadCommunities();
+        } else {
+            const error = await response.json();
+            alert(error.error || 'Failed to create community');
+        }
+    } catch (error) {
+        console.error('Error creating community:', error);
+        alert('Failed to create community');
+    }
+}
+
+function handleMessageSubmit(e) {
+    e.preventDefault();
+    const message = messageInput.value.trim();
+    
+    if (message && currentCommunityId) {
+        socket.emit('message', {
+            room: `community_${currentCommunityId}`,
+            message: message,
+            content: message
+        });
+        
+        messageInput.value = '';
+    }
+}
+
+function handleMessageHistory(data) {
+    if (data.community_id === currentCommunityId && messageArea) {
+        messageArea.innerHTML = '';
+        data.messages.forEach(displayMessage);
+        messageArea.scrollTop = messageArea.scrollHeight;
+    }
+}
+
+// Utility Functions
+async function loadAvailableUsers() {
+    try {
+        const response = await fetch('/api/users/available');
+        const users = await response.json();
+        
+        const memberSelect = document.getElementById('memberSelect');
+        memberSelect.innerHTML = '';
+        
+        users.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.username;
+            memberSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading available users:', error);
+    }
+}
+
+function updateCommunityStats(data) {
+    const sidebarItem = document.querySelector(`.community-item[data-community-id="${data.community_id}"]`);
+    if (sidebarItem) {
+        const statsElement = sidebarItem.querySelector('.text-sm.text-gray-500');
+        if (statsElement) {
+            statsElement.textContent = `${data.member_count} ${data.member_count === 1 ? 'member' : 'members'} • ${data.online_count} online`;
+        }
+    }
+
+    if (currentCommunityId === data.community_id) {
+        const headerStatsElement = document.querySelector('#currentCommunityStats');
+        if (headerStatsElement) {
+            headerStatsElement.textContent = `${data.online_count} online • ${data.member_count} members`;
+        }
+    }
+}
+
+function joinCommunity(communityId) {
+    currentCommunityId = communityId;
+    
+    if (messageArea) {
+        messageArea.innerHTML = '';
+    }
+
+    socket.emit('join_community', { community_id: communityId });
+    socket.emit('get_message_history', { community_id: communityId });
+
+    document.querySelectorAll('.community-item').forEach(item => {
+        const isSelected = item.dataset.communityId === communityId.toString();
+        item.classList.toggle('bg-gray-50', isSelected);
+    });
+
+    const community = communities.find(c => c.id === communityId);
+    if (community) {
+        const nameElement = document.getElementById('currentCommunityName');
+        const statsElement = document.querySelector('#currentCommunityStats');
+        
+        if (nameElement) {
+            nameElement.textContent = community.name;
+        }
+        if (statsElement) {
+            statsElement.textContent = `${community.online_count} online • ${community.member_count} members`;
+        }
+    }
+
+    loadCommunityMembers(communityId);
+}
+
+// Global function for removing members
+window.removeMember = async function(communityId, userId) {
+    if (!confirm('Are you sure you want to remove this member?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/communities/${communityId}/members/${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadCommunityMembers(communityId);
+            loadCommunities();
+        } else {
+            const error = await response.json();
+            alert(error.error);
+        }
+    } catch (error) {
+        console.error('Error removing member:', error);
+        alert('Failed to remove member');
+    }
+};
+
+async function loadAvailableUsersForAdd() {
+    try {
+        const response = await fetch('/api/users/available');
+        const users = await response.json();
+        
+        const memberSelect = document.getElementById('newMemberSelect');
+        memberSelect.innerHTML = '';
+        
+        // Filter out users who are already members
+        const currentMembers = await fetch(`/api/communities/${currentCommunityId}/members`);
+        const membersData = await currentMembers.json();
+        const memberIds = membersData.map(m => m.user_id.toString());
+        
+        users.filter(user => !memberIds.includes(user.id.toString()))
+            .forEach(user => {
+                const option = document.createElement('option');
+                option.value = user.id;
+                option.textContent = user.username;
+                memberSelect.appendChild(option);
+            });
+    } catch (error) {
+        console.error('Error loading available users:', error);
+    }
+}
+
+async function handleAddMembers(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const selectedUsers = Array.from(document.getElementById('newMemberSelect').selectedOptions)
+        .map(option => parseInt(option.value));
+    
+    try {
+        const promises = selectedUsers.map(userId => 
+            fetch(`/api/communities/${currentCommunityId}/members`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            })
+        );
+        
+        await Promise.all(promises);
+        
+        // Close modal and refresh
+        document.getElementById('addMembersModal').classList.add('hidden');
+        e.target.reset();
+        loadCommunityMembers(currentCommunityId);
+        loadCommunities();
+    } catch (error) {
+        console.error('Error adding members:', error);
+        alert('Failed to add members');
+    }
+}
