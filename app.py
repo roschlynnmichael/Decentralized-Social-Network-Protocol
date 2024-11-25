@@ -913,6 +913,10 @@ def verify_chat(friend_id):
     except Exception as e:
         app.logger.error(f"Error verifying chat: {str(e)}")
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/community')
+def community():
+    return render_template('community.html')
 
 @socketio.on('typing')
 def handle_typing(data):
