@@ -6,6 +6,7 @@ class GroupDHT:
         self.group_id = group_id
         self.nodes = {}  # user_id -> DHTNode
         self.node_list = []  # Sorted list of nodes
+        self.message_keys = set()  # Track message keys for retrieval
 
     def add_member(self, user_id, ip_address, port):
         """Add a new member to the DHT ring"""
@@ -59,4 +60,17 @@ class GroupDHT:
         responsible_node = self._find_successor(key_hash)
         responsible_node.store_data(message_key, message_data)
         
+        # Track message key for retrieval
+        self.message_keys.add(message_key)
         return message_key
+
+    def get_messages(self):
+        """Retrieve all messages from the DHT"""
+        messages = []
+        for key in sorted(self.message_keys):  # Sort by key to maintain chronological order
+            key_hash = self.node_list[0]._hash(key) % 1024
+            responsible_node = self._find_successor(key_hash)
+            message = responsible_node.get_data(key)
+            if message:
+                messages.append(message)
+        return messages

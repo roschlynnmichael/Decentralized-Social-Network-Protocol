@@ -16,6 +16,7 @@ import smtplib
 import random
 import logging
 import string
+import socket
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -71,6 +72,20 @@ message_handler = MessageHandler()
 # Login Manager Setup
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+def get_system_ip():
+    try:
+        # This creates a socket that doesn't actually connect
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # This triggers the socket to get the system's primary IP
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return '127.0.0.1' 
+
+SYSTEM_IP = get_system_ip()
 
 # Get allowed extensions and upload folder from config
 def allowed_file(filename):
@@ -1121,18 +1136,50 @@ def handle_reaction(data):
         'user_id': user_id
     }, room=room)
 
+@socketio.on('join')
+def on_join(data):
+    room = data.get('room')
+    if room:
+        join_room(room)
+        print(f"User {current_user.username} joined room: {room}")
+
 @socketio.on('message')
 def handle_message(data):
-    room = data.get('room')
-    message = data.get('message')
-    username = current_user.username  # Assuming you're using Flask-Login
-    
-    # Broadcast the message to all users in the room
-    emit('message', {
-        'username': username,
-        'content': message,
-        'timestamp': datetime.now().isoformat()
-    }, room=room, broadcast=True)
+    try:
+        room = data.get('room')
+        message = data.get('message') or data.get('content')
+        
+        if not room or not message:
+            return
+            
+        community_id = int(room.replace('community_', ''))
+        
+        # Get or create DHT for this community
+        dht = active_group_dhts.get(community_id)
+        if not dht:
+            dht = GroupDHT(community_id)
+            port = P2PSocketHandler.find_free_port()
+            dht.add_member(current_user.id, SYSTEM_IP, port)
+            active_group_dhts[community_id] = dht
+            
+        # Create message data
+        message_data = {
+            'username': current_user.username,
+            'content': message,
+            'message': message,
+            'timestamp': datetime.now().isoformat(),
+            'sender_id': current_user.id
+        }
+        
+        # Store in DHT
+        dht.store_message(message_data)
+        
+        print(f"Emitting message to room {room}: {message_data}")
+        emit('message', message_data, to=room)
+        
+    except Exception as e:
+        print(f"Error handling message: {str(e)}")
+        emit('error', {'message': str(e)})
 
 @socketio.on('connect')
 def handle_connect(auth=None):
@@ -1150,3 +1197,114 @@ def handle_disconnect():
             if not active_users[current_user.id]:
                 active_users.pop(current_user.id, None)
             update_community_stats()
+
+@socketio.on('join_community')
+def handle_join_community(data):
+    try:
+        community_id = data['community_id']
+        if community_id in active_group_dhts:
+            dht = active_group_dhts[community_id]
+            
+            # Get all messages from DHT
+            messages = dht.get_messages()
+            
+            # Sort messages by timestamp
+            messages.sort(key=lambda x: x['timestamp'])
+            
+            # Send message history to client
+            emit('message_history', {
+                'community_id': community_id,
+                'messages': messages
+            })
+            
+            # Join the room
+            join_room(f"community_{community_id}")
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
+@socketio.on('get_message_history')
+def handle_get_history(data):
+    try:
+        community_id = data.get('community_id')
+        if not community_id:
+            return
+            
+        # Get or create the DHT for this community
+        dht = active_group_dhts.get(community_id)
+        if not dht:
+            dht = GroupDHT(community_id)
+            port = P2PSocketHandler.find_free_port()
+            dht.add_member(current_user.id, SYSTEM_IP, port)
+            active_group_dhts[community_id] = dht
+            
+        # Get all messages from DHT
+        messages = dht.get_messages()
+        
+        # Sort messages by timestamp
+        messages.sort(key=lambda x: x['timestamp'])
+        
+        print(f"Sending message history for community {community_id}: {messages}")
+        
+        # Send message history to client
+        emit('message_history', {
+            'community_id': community_id,
+            'messages': messages
+        })
+        
+    except Exception as e:
+        print(f"Error getting message history: {str(e)}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('join_community')
+def handle_join_community(data):
+    try:
+        community_id = data.get('community_id')
+        if community_id:
+            # Join the room
+            join_room(f"community_{community_id}")
+            print(f"User {current_user.username} joined community: {community_id}")
+            
+            # Update community stats
+            update_community_stats()
+            
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
+@socketio.on('message')
+def handle_message(data):
+    try:
+        room = data.get('room')
+        message = data.get('message') or data.get('content')
+        
+        if not room or not message:
+            return
+            
+        community_id = int(room.replace('community_', ''))
+        
+        # Get or create DHT for this community
+        dht = active_group_dhts.get(community_id)
+        if not dht:
+            dht = GroupDHT(community_id)
+            # Initialize with a node for the community
+            port = random.randint(*DHT_PORT_RANGE)
+            dht.add_member(current_user.id, LOCAL_IP, port)
+            active_group_dhts[community_id] = dht
+            
+        # Create message data
+        message_data = {
+            'username': current_user.username,
+            'content': message,
+            'message': message,
+            'timestamp': datetime.now().isoformat(),
+            'sender_id': current_user.id
+        }
+        
+        # Store in DHT
+        dht.store_message(message_data)
+        
+        print(f"Emitting message to room {room}: {message_data}")
+        emit('message', message_data, to=room)
+        
+    except Exception as e:
+        print(f"Error handling message: {str(e)}")
+        emit('error', {'message': str(e)})

@@ -1,5 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     const socket = io();
+    let communities = [];
+    let currentCommunityId = null;
     
     // Listen for community stats updates
     socket.on('community_stats_update', (data) => {
@@ -25,65 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Initialize chat handlers
-    const messageForm = document.getElementById('messageForm');
-    const messageInput = document.getElementById('messageInput');
-    const messageArea = document.getElementById('messageArea');
-    let currentCommunityId = null;
-
-    // Function to load communities
-    async function loadCommunities() {
-        try {
-            const response = await fetch('/api/communities');
-            if (!response.ok) {
-                throw new Error('Failed to fetch communities');
-            }
-            
-            const communities = await response.json();
-            const communitiesList = document.querySelector('.communities-list');
-            
-            if (!communitiesList) {
-                console.error('Communities list element not found');
-                return;
-            }
-            
-            communitiesList.innerHTML = '';
-            
-            communities.forEach(community => {
-                const communityElement = document.createElement('div');
-                communityElement.className = 'community-item p-3 hover:bg-gray-50 cursor-pointer rounded-lg transition-colors';
-                communityElement.dataset.communityId = community.id;
-                
-                communityElement.innerHTML = `
-                    <div class="flex items-center space-x-3">
-                        <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white">
-                            <i class="fas fa-users"></i>
-                        </div>
-                        <div>
-                            <h3 class="font-medium">${community.name}</h3>
-                            <p class="text-sm text-gray-500">
-                                ${community.member_count || 0} members • ${community.online_count || 0} online
-                            </p>
-                        </div>
-                    </div>
-                `;
-                
-                communityElement.addEventListener('click', () => {
-                    joinCommunity(community.id);
-                });
-                
-                communitiesList.appendChild(communityElement);
-            });
-        } catch (error) {
-            console.error('Error loading communities:', error);
-        }
-    }
-
-    // Add message socket listener
-    socket.on('message', (data) => {
-        console.log('Received message:', data);
+    function displayMessage(data) {
         if (!messageArea) {
-            console.error('Message area not found in DOM');
+            console.error('Message area not found');
             return;
         }
         
@@ -111,6 +57,70 @@ document.addEventListener('DOMContentLoaded', () => {
         
         messageArea.appendChild(messageElement);
         messageArea.scrollTop = messageArea.scrollHeight;
+    }
+
+    // Initialize chat handlers
+    const messageForm = document.getElementById('messageForm');
+    const messageInput = document.getElementById('messageInput');
+    const messageArea = document.getElementById('messageArea');
+
+    // Function to load communities
+    async function loadCommunities() {
+        try {
+            const response = await fetch('/api/communities');
+            if (!response.ok) {
+                throw new Error('Failed to fetch communities');
+            }
+            
+            communities = await response.json();
+            const communitiesList = document.querySelector('.communities-list');
+            
+            if (!communitiesList) {
+                console.error('Communities list element not found');
+                return;
+            }
+            
+            communitiesList.innerHTML = '';
+            
+            communities.forEach(community => {
+                const communityElement = document.createElement('div');
+                communityElement.className = 'community-item p-3 hover:bg-gray-50 cursor-pointer rounded-lg transition-colors';
+                communityElement.dataset.communityId = community.id;
+                
+                communityElement.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-medium">${community.name}</h3>
+                            <p class="text-sm text-gray-500">
+                                ${community.member_count} ${community.member_count === 1 ? 'member' : 'members'} • ${community.online_count} online
+                            </p>
+                        </div>
+                    </div>
+                `;
+                
+                communityElement.addEventListener('click', () => {
+                    joinCommunity(community.id);
+                });
+                
+                communitiesList.appendChild(communityElement);
+            });
+        } catch (error) {
+            console.error('Error loading communities:', error);
+        }
+    }
+
+    // Update the socket event handlers
+    socket.on('connect', () => {
+        console.log('Socket connected');
+    });
+
+    // Add message handler
+    socket.on('message', (data) => {
+        console.log('Received message:', data);
+        displayMessage(data);
     });
 
     // Handle message form submission
@@ -140,8 +150,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 socket.emit('leave', { room: `community_${currentCommunityId}` });
             }
             currentCommunityId = communityId;
-            socket.emit('join', { room: `community_${communityId}` });
             
+            // Clear message area
+            if (messageArea) {
+                messageArea.innerHTML = '';
+            }
+    
+            // Join the Socket.IO room and request message history
+            socket.emit('join_community', { 
+                community_id: communityId 
+            });
+    
+            socket.emit('get_message_history', { 
+                community_id: communityId 
+            });
+    
             // Update UI
             document.querySelectorAll('.community-item').forEach(item => {
                 const isSelected = item.dataset.communityId === communityId.toString();
@@ -153,24 +176,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (currentCommunityNameEl) {
                         currentCommunityNameEl.textContent = communityName;
                     }
+
+                    // Find the community data
+                    const community = communities.find(c => c.id === communityId);
+                    if (community) {
+                        const headerStatsElement = document.querySelector('#currentCommunityStats');
+                        if (headerStatsElement) {
+                            headerStatsElement.textContent = `${community.online_count} online • ${community.member_count} members`;
+                        }
+                    }
                 }
             });
-            
-            // Clear message area
-            if (messageArea) {
-                messageArea.innerHTML = '';
-            }
-            
-            // Update the header stats when joining
-            const community = communities.find(c => c.id === communityId);
-            if (community) {
-                const headerStatsElement = document.querySelector('#currentCommunityStats');
-                if (headerStatsElement) {
-                    headerStatsElement.textContent = `${community.online_count} online • ${community.member_count} members`;
-                }
-            }
         }
     }
+
+    // Message history handler remains the same but now displayMessage is defined
+    socket.on('message_history', (data) => {
+        console.log('Received message history:', data);
+        if (data.community_id === currentCommunityId && messageArea) {
+            // Clear existing messages
+            messageArea.innerHTML = '';
+            
+            // Display each message in history
+            data.messages.forEach(message => {
+                displayMessage(message);
+            });
+            
+            // Scroll to bottom
+            messageArea.scrollTop = messageArea.scrollHeight;
+        }
+    });
 
     // Load communities when page loads
     loadCommunities();

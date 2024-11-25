@@ -14,6 +14,8 @@ class DHTNode:
         self.finger_table = {}
         self.successor = None
         self.predecessor = None
+        self.storage_file = f"dht_storage_{user_id}.json"
+        self._load_stored_data()
         
         # Setup socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -51,13 +53,34 @@ class DHTNode:
         elif msg_type == 'find_successor':
             self._handle_find_successor(message, addr)
 
+    def _load_stored_data(self):
+        """Load persisted data from file"""
+        try:
+            with open(self.storage_file, 'r') as f:
+                self.data_store = json.load(f)
+        except FileNotFoundError:
+            self.data_store = {}
+
+    def _save_data(self):
+        """Persist data to file"""
+        with open(self.storage_file, 'w') as f:
+            json.dump(self.data_store, f)
+
     def store_data(self, key, value):
-        """Store data in this node"""
-        key_hash = self._hash(key)
-        if self._is_responsible_for(key_hash):
-            self.data_store[key] = value
+        """Store data with timestamp"""
+        if self._is_responsible_for(self._hash(key)):
+            self.data_store[key] = {
+                'value': value,
+                'timestamp': time.time()
+            }
+            self._save_data()
             return True
         return False
+
+    def get_data(self, key):
+        """Retrieve data if available"""
+        data = self.data_store.get(key)
+        return data['value'] if data else None
 
     def _is_responsible_for(self, key_hash):
         """Check if this node is responsible for a key"""
