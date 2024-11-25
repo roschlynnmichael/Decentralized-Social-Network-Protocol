@@ -176,6 +176,10 @@ function showUploadStatus(message, progress, stepsData, uploadId) {
         document.body.appendChild(statusContainer);
     }
 
+    // Get the current chat name properly
+    const currentChatNameElement = document.getElementById('currentChatName');
+    const recipientName = currentChatNameElement ? currentChatNameElement.textContent : 'User';
+
     let statusElement = document.getElementById(`upload-${uploadId}`);
     if (!statusElement) {
         statusElement = document.createElement('div');
@@ -184,7 +188,7 @@ function showUploadStatus(message, progress, stepsData, uploadId) {
         statusElement.innerHTML = `
             <div class="flex items-center justify-between mb-2">
                 <span class="text-sm font-medium text-gray-700">
-                    Sending file to: ${currentChatName || 'User'}
+                    Sending file to: ${recipientName}
                 </span>
                 <button class="text-gray-400 hover:text-gray-600" onclick="removeUploadStatus('${uploadId}')">
                     <i class="fas fa-times"></i>
@@ -197,9 +201,9 @@ function showUploadStatus(message, progress, stepsData, uploadId) {
             <div class="mt-2 flex gap-2">
                 ${stepsData.steps.map(step => `
                     <span class="text-xs ${step.status === 'complete' ? 'text-green-500' : 
-                                        step.status === 'current' ? 'text-blue-500' : 
-                                        step.status === 'error' ? 'text-red-500' : 
-                                        'text-gray-400'}">
+                                    step.status === 'current' ? 'text-blue-500' : 
+                                    step.status === 'error' ? 'text-red-500' : 
+                                    'text-gray-400'}">
                         ${step.label}
                     </span>
                 `).join(' • ')}
@@ -212,7 +216,7 @@ function showUploadStatus(message, progress, stepsData, uploadId) {
             statusElement.classList.add('show');
         }, 100);
     } else {
-        // Update existing notification
+        // Update existing notification (rest of the code remains the same)
         const messageEl = statusElement.querySelector('.text-gray-600');
         const progressBar = statusElement.querySelector('.bg-blue-600');
         const stepsEl = statusElement.querySelector('.mt-2');
