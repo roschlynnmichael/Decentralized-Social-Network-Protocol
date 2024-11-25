@@ -121,11 +121,19 @@
                                     <span id="currentCommunityStats" class="text-sm text-gray-500"></span>
                                 </div>
                             </div>
-                            <button id="addMembersBtn" 
-                                    class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 hidden">
-                                <i class="fas fa-user-plus mr-2"></i>
-                                Add Members
-                            </button>
+                            <div class="flex items-center space-x-4">
+                                <button id="addMembersBtn" 
+                                        class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 hidden">
+                                    <i class="fas fa-user-plus mr-2"></i>
+                                    Add Members
+                                </button>
+                                <button id="clearChatBtn" 
+                                        class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                                        onclick="clearCommunityChat()">
+                                    <i class="fas fa-trash-alt mr-2"></i>
+                                    Clear Chat
+                                </button>
+                            </div>
                         </div>
                         <!-- Members list will be appended here -->
                     </div>

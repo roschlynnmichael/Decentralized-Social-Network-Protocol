@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('message', displayMessage);
     socket.on('message_history', handleMessageHistory);
     socket.on('community_stats_update', updateCommunityStats);
+    socket.on('clear_chat', handleClearChat);
 
     // UI event listeners
     createCommunityBtn.addEventListener('click', () => {
@@ -356,6 +357,12 @@ function handleMessageHistory(data) {
     }
 }
 
+function handleClearChat(data) {
+    if (data.community_id === currentCommunityId && messageArea) {
+        messageArea.innerHTML = '';
+    }
+}
+
 // Utility Functions
 async function loadAvailableUsers() {
     try {
@@ -568,5 +575,33 @@ function showUploadStatus(filename, progress) {
 function removeUploadStatus(filename) {
     const element = document.getElementById(`upload-${filename}`);
     if (element) element.remove();
+}
+
+async function clearCommunityChat() {
+    if (!currentCommunityId) return;
+    
+    if (!confirm('Are you sure you want to clear all messages? This cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/communities/${currentCommunityId}/clear_chat`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to clear chat');
+        }
+        
+        // Clear messages locally
+        if (messageArea) {
+            messageArea.innerHTML = '';
+        }
+        
+    } catch (error) {
+        console.error('Error clearing chat:', error);
+        alert('Failed to clear chat: ' + error.message);
+    }
 }
 

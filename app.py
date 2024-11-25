@@ -1385,6 +1385,25 @@ def create_community():
         app.logger.error(f"Error creating community: {str(e)}")
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/communities/<int:community_id>/clear_chat', methods=['POST'])
+@login_required
+def clear_community_chat(community_id):
+    try:
+        # Delete messages for this community
+        Message.query.filter_by(community_id=community_id).delete()
+        db.session.commit()
+        
+        # Emit event to all users in the community to clear their chat
+        socketio.emit('clear_chat', {
+            'community_id': community_id
+        }, room=f"community_{community_id}")
+        
+        return jsonify({'success': True, 'message': 'Chat cleared successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error clearing chat: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @socketio.on('typing')
 def handle_typing(data):
