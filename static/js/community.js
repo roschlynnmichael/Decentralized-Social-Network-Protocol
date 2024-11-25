@@ -62,6 +62,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load initial communities
     loadCommunities();
+
+    // File sharing setup
+    const fileButton = document.getElementById('fileButton');
+    const fileInput = document.getElementById('communityFileInput');
+    
+    if (fileButton && fileInput) {
+        fileButton.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFileSelect);
+    }
 });
 
 // Community Management Functions
@@ -179,10 +188,36 @@ function displayMessage(data) {
     
     const messageElement = document.createElement('div');
     messageElement.className = 'message p-3 bg-white rounded-lg shadow-sm mb-3';
+    messageElement.setAttribute('data-message-id', data.id);
     
     const content = data.content || data.message || '';
     const username = data.username || 'Unknown User';
     const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+    
+    let contentHtml = '';
+    
+    // Handle file messages
+    if (data.fileInfo) {
+        const fileInfo = data.fileInfo;
+        const fileSize = fileInfo.size ? formatFileSize(fileInfo.size) : '';
+        
+        contentHtml = `
+            <div class="flex items-center space-x-2 bg-gray-50 p-2 rounded hover:bg-gray-100">
+                <a href="#" 
+                   class="file-link flex items-center space-x-2 text-primary hover:text-blue-700 flex-1"
+                   data-hash="${fileInfo.hash}"
+                   data-filename="${fileInfo.name}"
+                   data-size="${fileInfo.size}"
+                   onclick="event.preventDefault();">
+                    <i class="fas ${getFileIcon(fileInfo.type)}"></i>
+                    <span class="flex-1">${fileInfo.name}</span>
+                    <span class="text-sm text-gray-500">${fileSize}</span>
+                    <i class="fas fa-download"></i>
+                </a>
+            </div>`;
+    } else {
+        contentHtml = `<p class="text-gray-600">${content}</p>`;
+    }
     
     messageElement.innerHTML = `
         <div class="flex items-start">
@@ -191,16 +226,79 @@ function displayMessage(data) {
                     ${username[0].toUpperCase()}
                 </div>
             </div>
-            <div class="ml-3">
+            <div class="ml-3 flex-1">
                 <p class="font-medium text-sm">${username}</p>
-                <p class="text-gray-600">${content}</p>
+                ${contentHtml}
                 <p class="text-xs text-gray-400 mt-1">${timestamp}</p>
             </div>
         </div>
     `;
     
+    // Add click event listener for file downloads
+    if (data.fileInfo) {
+        const fileLink = messageElement.querySelector('.file-link');
+        fileLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            const hash = fileLink.getAttribute('data-hash');
+            const filename = fileLink.getAttribute('data-filename');
+            if (window.fileSharing) {
+                window.fileSharing.handleFileDownload(hash, filename, currentCommunityId);
+            } else {
+                console.error('File sharing handler not initialized');
+            }
+        });
+    }
+    
     messageArea.appendChild(messageElement);
     messageArea.scrollTop = messageArea.scrollHeight;
+}
+
+// Helper function to format file sizes
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Helper function to get appropriate file icon
+function getFileIcon(mimeType) {
+    if (!mimeType) return 'fa-file';
+    
+    if (mimeType.startsWith('image/')) return 'fa-file-image';
+    if (mimeType.startsWith('video/')) return 'fa-file-video';
+    if (mimeType.startsWith('audio/')) return 'fa-file-audio';
+    if (mimeType.includes('pdf')) return 'fa-file-pdf';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word';
+    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fa-file-excel';
+    if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-archive';
+    
+    return 'fa-file';
+}
+
+// Helper function to format file sizes
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Helper function to get appropriate file icon
+function getFileIcon(mimeType) {
+    if (!mimeType) return 'fa-file';
+    
+    if (mimeType.startsWith('image/')) return 'fa-file-image';
+    if (mimeType.startsWith('video/')) return 'fa-file-video';
+    if (mimeType.startsWith('audio/')) return 'fa-file-audio';
+    if (mimeType.includes('pdf')) return 'fa-file-pdf';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word';
+    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fa-file-excel';
+    if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-archive';
+    
+    return 'fa-file';
 }
 
 // Event Handlers
@@ -403,3 +501,72 @@ async function handleAddMembers(e) {
         alert('Failed to add members');
     }
 }
+
+async function handleFileSelect(e) {
+    const files = e.target.files;
+    if (!files.length || !currentCommunityId) return;
+
+    try {
+        for (const file of files) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('community_id', currentCommunityId);
+
+            // Show upload status
+            showUploadStatus(file.name, 0);
+
+            const response = await fetch('/api/community/share_file', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) throw new Error('Upload failed');
+            const result = await response.json();
+
+            // Update upload status
+            showUploadStatus(file.name, 100);
+            setTimeout(() => removeUploadStatus(file.name), 2000);
+        }
+    } catch (error) {
+        console.error('Error uploading files:', error);
+        alert('Failed to upload file(s)');
+    }
+
+    // Clear the input
+    e.target.value = '';
+}
+
+function showUploadStatus(filename, progress) {
+    let statusContainer = document.getElementById('uploadStatusContainer');
+    if (!statusContainer) {
+        statusContainer = document.createElement('div');
+        statusContainer.id = 'uploadStatusContainer';
+        statusContainer.className = 'fixed bottom-4 right-4 space-y-2 z-50';
+        document.body.appendChild(statusContainer);
+    }
+
+    let statusElement = document.getElementById(`upload-${filename}`);
+    if (!statusElement) {
+        statusElement = document.createElement('div');
+        statusElement.id = `upload-${filename}`;
+        statusElement.className = 'bg-white shadow-lg rounded-lg p-4 mb-2';
+        statusElement.innerHTML = `
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700">Uploading: ${filename}</span>
+            </div>
+            <div class="h-2 bg-gray-200 rounded-full">
+                <div class="h-full bg-blue-600 rounded-full transition-all duration-300" style="width: ${progress}%"></div>
+            </div>
+        `;
+        statusContainer.appendChild(statusElement);
+    } else {
+        const progressBar = statusElement.querySelector('.bg-blue-600');
+        if (progressBar) progressBar.style.width = `${progress}%`;
+    }
+}
+
+function removeUploadStatus(filename) {
+    const element = document.getElementById(`upload-${filename}`);
+    if (element) element.remove();
+}
+

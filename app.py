@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, send_file
-from flask import current_app, session
+from flask import current_app, session, after_this_request
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from python_scripts.sql_models.models import db, User, FriendRequest, Group, GroupMember, Message
@@ -14,11 +14,13 @@ from python_scripts.dht.group_dht import GroupDHT
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 import smtplib
 import random
+import mimetypes
 import logging
 import string
 import socket
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
+from python_scripts.handlers.community_file_handler import CommunityFileHandler
 from werkzeug.exceptions import RequestEntityTooLarge
 from flask_socketio import SocketIO, emit, join_room, send, leave_room
 import requests
@@ -1181,6 +1183,158 @@ def remove_community_member(community_id, user_id):
         update_community_stats()
         return jsonify({'success': True})
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/community/share_file', methods=['POST'])
+@login_required
+def handle_community_file_upload():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+            
+        file = request.files['file']
+        community_id = request.form.get('community_id')
+        
+        if not file or not community_id:
+            return jsonify({'error': 'Invalid request parameters'}), 400
+            
+        # Read file content
+        file_content = file.read()
+        filename = secure_filename(file.filename)
+        
+        # Register file with CommunityFileHandler
+        file_metadata = CommunityFileHandler.register_file(
+            file_content=file_content,
+            filename=filename,
+            user_id=current_user.id,
+            community_id=community_id
+        )
+        
+        # Create a message to notify about the shared file
+        message = Message(
+            community_id=community_id,
+            sender_id=current_user.id,
+            username=current_user.username,
+            content=f"Shared file: {filename}",
+            file_info={
+                'name': filename,
+                'size': len(file_content),
+                'type': file.content_type,
+                'hash': file_metadata['hash']
+            }
+        )
+        
+        db.session.add(message)
+        db.session.commit()
+        
+        # Emit message to community room
+        socketio.emit('message', {
+            'username': current_user.username,
+            'content': message.content,
+            'timestamp': message.timestamp.isoformat(),
+            'sender_id': current_user.id,
+            'fileInfo': message.file_info
+        }, room=f"community_{community_id}")
+        
+        return jsonify({
+            'message': 'File uploaded successfully',
+            'file_info': file_metadata
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in community file upload: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/community/download_file/<file_hash>/<filename>')
+@login_required
+def download_community_file(file_hash, filename):
+    try:
+        community_id = request.args.get('community_id')
+        if not community_id:
+            return jsonify({'error': 'Community ID not provided'}), 400
+            
+        # Get the file content
+        file_content = CommunityFileHandler.get_shared_file(file_hash)
+        if not file_content:
+            return jsonify({'error': 'File not found'}), 404
+
+        # Create a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        temp_path = temp_file.name
+        
+        # Write the content to the temp file
+        with open(temp_path, 'wb') as f:
+            if isinstance(file_content, str):
+                f.write(file_content.encode())
+            else:
+                f.write(file_content)
+
+        # Get MIME type
+        mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+        # Clean up the temp file after sending
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                app.logger.error(f"Error cleaning up temp file: {e}")
+            return response
+
+        return send_file(
+            temp_path,
+            mimetype=mime_type,
+            as_attachment=True,
+            download_name=filename,
+            max_age=0
+        )
+
+    except Exception as e:
+        app.logger.error(f"Download error: {str(e)}")
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/community/share_file', methods=['POST'])
+@login_required
+def share_community_file():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        community_id = request.form.get('community_id')
+
+        if not community_id:
+            return jsonify({'error': 'Community ID required'}), 400
+
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File type not allowed'}), 400
+
+        # Generate unique task ID
+        task_id = f"community_upload_{int(time.time())}_{current_user.id}"
+        
+        # Start upload process
+        upload_executor.submit(
+            handle_community_file_upload,
+            file.read(),
+            secure_filename(file.filename),
+            current_user.id,
+            community_id,
+            task_id
+        )
+
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'message': 'Upload started'
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error sharing community file: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/communities', methods=['POST'])
