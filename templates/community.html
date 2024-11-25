@@ -88,7 +88,7 @@
 
         <div class="grid grid-cols-12 h-full">
             <!-- Communities List Sidebar -->
-            <div class="col-span-3 border-r border-border bg-surface overflow-y-auto">
+            <div class="col-span-2 border-r border-border bg-surface overflow-y-auto">
                 <!-- Search Communities -->
                 <div class="p-4 border-b border-border">
                     <div class="relative">
@@ -106,7 +106,7 @@
             </div>
 
             <!-- Chat Area -->
-            <div class="col-span-9 flex flex-col h-full">
+            <div class="col-span-8 flex flex-col h-full">
                 <!-- Community Header -->
                 <div class="p-4 border-b border-border bg-surface">
                     <div id="currentCommunityHeader">
@@ -150,6 +150,16 @@
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+
+            <!-- Members Sidebar -->
+            <div class="col-span-2 border-l border-border bg-surface overflow-y-auto">
+                <div class="p-4 border-b border-border">
+                    <h3 class="font-semibold text-gray-700">Members</h3>
+                </div>
+                <div id="membersList" class="p-2 space-y-2">
+                    <!-- Members will be dynamically added here -->
                 </div>
             </div>
         </div>

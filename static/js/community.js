@@ -112,74 +112,53 @@ async function loadCommunityMembers(communityId) {
     try {
         const response = await fetch(`/api/communities/${communityId}/members`);
         
-        // Debug the response
-        console.log('Response status:', response.status);
-        const data = await response.json();
-        console.log('Response data:', data);
-
         if (!response.ok) {
+            const data = await response.json();
             throw new Error(data.error || 'Failed to load members');
         }
 
+        const data = await response.json();
         const members = Array.isArray(data) ? data : [];
-        console.log('Processed members:', members);
         
         const currentUserId = parseInt(currentUser.id);
         const currentUserMember = members.find(m => parseInt(m.user_id) === currentUserId);
         const isAdmin = currentUserMember?.role === 'admin';
         
-        console.log('Current user ID:', currentUserId);
-        console.log('Is admin?', isAdmin);
-        
-        const membersList = document.createElement('div');
-        membersList.className = 'mt-4 space-y-2';
+        // Update members sidebar
+        const membersList = document.getElementById('membersList');
+        membersList.innerHTML = '';
         
         members.forEach(member => {
             const memberElement = document.createElement('div');
-            memberElement.className = 'flex items-center justify-between p-2 bg-gray-50 rounded';
+            memberElement.className = 'flex items-center justify-between p-2 hover:bg-gray-50 rounded';
             
             memberElement.innerHTML = `
                 <div class="flex items-center space-x-2">
                     <div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white">
                         ${member.username ? member.username[0].toUpperCase() : '?'}
                     </div>
-                    <span>${member.username || 'Unknown User'}</span>
-                    ${member.role === 'admin' ? 
-                        '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Admin</span>' : 
-                        '<span class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded">Member</span>'
-                    }
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium">${member.username || 'Unknown User'}</span>
+                        <span class="text-xs text-gray-500">
+                            ${member.role === 'admin' ? 
+                                '<span class="text-blue-600">Admin</span>' : 
+                                'Member'}
+                        </span>
+                    </div>
                 </div>
                 ${isAdmin && parseInt(member.user_id) !== currentUserId && member.role !== 'admin' ? `
                     <button 
-                        class="px-2 py-1 text-white bg-red-500 hover:bg-red-600 rounded-lg flex items-center space-x-1" 
+                        class="text-red-500 hover:text-red-600" 
                         onclick="removeMember(${communityId}, ${member.user_id})"
                     >
                         <i class="fas fa-times"></i>
-                        <span>Remove</span>
                     </button>
                 ` : ''}
             `;
             
             membersList.appendChild(memberElement);
         });
-        
-        // Find and update the header
-        const header = document.querySelector('#currentCommunityHeader');
-        if (!header) {
-            console.warn('Community header not found, creating it');
-            const container = document.querySelector('.col-span-9') || document.body;
-            const newHeader = document.createElement('div');
-            newHeader.id = 'currentCommunityHeader';
-            container.prepend(newHeader);
-        }
-        
-        const existingList = document.querySelector('.members-list');
-        if (existingList) {
-            existingList.remove();
-        }
-        membersList.classList.add('members-list');
-        header.appendChild(membersList);
-        
+
         // Show/hide Add Members button based on admin status
         const addMembersBtn = document.getElementById('addMembersBtn');
         if (addMembersBtn) {
@@ -188,13 +167,10 @@ async function loadCommunityMembers(communityId) {
         
     } catch (error) {
         console.error('Error loading members:', error);
-        // Show error to user in a visible location
         const errorElement = document.createElement('div');
-        errorElement.className = 'mt-4 p-2 bg-red-100 text-red-700 rounded';
-        errorElement.textContent = 'Failed to load community members. Please try again later.';
-        
-        const container = document.querySelector('.col-span-9') || document.body;
-        container.prepend(errorElement);
+        errorElement.className = 'p-2 text-sm text-red-600';
+        errorElement.textContent = 'Failed to load members. Please try again later.';
+        document.getElementById('membersList').appendChild(errorElement);
     }
 }
 // Message Handling Functions
