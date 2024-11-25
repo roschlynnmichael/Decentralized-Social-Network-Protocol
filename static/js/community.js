@@ -294,6 +294,23 @@ function displayMessage(data) {
     
     messageArea.appendChild(messageElement);
     messageArea.scrollTop = messageArea.scrollHeight;
+
+    // Add this new code to attach the click handler for file downloads
+    if (data.fileInfo) {
+        const fileLink = messageElement.querySelector('.file-link');
+        if (fileLink) {
+            fileLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                const fileHash = data.fileInfo.hash;
+                const fileName = data.fileInfo.name;
+                if (window.fileSharing) {
+                    window.fileSharing.handleFileDownload(fileHash, fileName, currentCommunityId);
+                } else {
+                    console.error('File sharing not initialized');
+                }
+            });
+        }
+    }
 }
 
 // Event Handlers
