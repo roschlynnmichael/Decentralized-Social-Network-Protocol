@@ -53,3 +53,25 @@ friendships = db.Table(
     db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key = True),
     db.Column('friend_id', db.Integer, db.ForeignKey('user.id'), primary_key = True)
 )
+
+class Group(db.Model):
+    __tablename__ = 'groups'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Change 'users.id' to 'user.id'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    creator = db.relationship('User', backref='created_groups')
+    members = db.relationship(
+        'User',
+        secondary='group_members',
+        backref=db.backref('groups', lazy='dynamic')
+    )
+
+class GroupMember(db.Model):
+    __tablename__ = 'group_members'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)  # Change 'users.id' to 'user.id'
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), primary_key=True)
+    role = db.Column(db.String(20), default='member')
+    joined_at = db.Column(db.DateTime, default=datetime.utcnow)

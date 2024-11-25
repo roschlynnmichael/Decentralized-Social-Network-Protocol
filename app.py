@@ -1,10 +1,16 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, send_file
+from flask import current_app, session
 from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
-from python_scripts.sql_models.models import db, User, FriendRequest
+from python_scripts.sql_models.models import db, User, FriendRequest, Group, GroupMember
 from python_scripts.handlers.p2p_socket_handler import P2PSocketHandler
 from python_scripts.handlers.message_handler import MessageHandler
 from python_scripts.handlers.ipfs_handler import IPFSHandler
+from python_scripts.dht.group_dht import GroupDHT
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 import smtplib
 import random
@@ -16,9 +22,6 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from flask_socketio import SocketIO, emit, join_room, send, leave_room
 import requests
 import json
-import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
 from urllib.parse import quote
 from dotenv import load_dotenv
@@ -29,10 +32,12 @@ import logging
 import tempfile
 import hashlib
 import time
+from python_scripts.dht.group_dht import GroupDHT
 from concurrent.futures import ThreadPoolExecutor
 
 upload_executor = ThreadPoolExecutor(max_workers=5)
 upload_status = {}
+active_group_dhts = {}
 
 load_dotenv()
 
@@ -915,8 +920,161 @@ def verify_chat(friend_id):
         return jsonify({"error": str(e)}), 500
     
 @app.route('/community')
+@login_required
 def community():
     return render_template('community.html')
+
+@app.route('/api/groups/create', methods=['POST'])
+@login_required
+def create_group():
+    try:
+        data = request.json
+        group_name = data.get('name')
+        member_ids = data.get('members', [])
+        
+        # Create group in database
+        group = Group(
+            name=group_name,
+            creator_id=current_user.id,
+            created_at=datetime.utcnow()
+        )
+        
+        # Add members to the group
+        for user_id in member_ids:
+            user = User.query.get(user_id)
+            if user:
+                group.members.append(user)
+        
+        db.session.add(group)
+        db.session.commit()
+        
+        # Create DHT for group
+        dht = GroupDHT(group.id)
+        
+        # Add members to DHT using existing find_free_port
+        for user_id in member_ids:
+            user = User.query.get(user_id)
+            if user:
+                # Use P2PSocketHandler's find_free_port method
+                dht_port = P2PSocketHandler.find_free_port()
+                dht.add_member(user.id, user.ip_address, dht_port)
+        
+        active_group_dhts[group.id] = dht
+        
+        return jsonify({
+            'success': True,
+            'group_id': group.id
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@socketio.on('group_message')
+def handle_group_message(data):
+    try:
+        group_id = data['group_id']
+        content = data['content']
+        
+        if group_id in active_group_dhts:
+            dht = active_group_dhts[group_id]
+            
+            message_data = {
+                'sender_id': current_user.id,
+                'content': content,
+                'timestamp': time.time()
+            }
+            
+            # Store in DHT
+            message_key = dht.store_message(message_data)
+            
+            # Emit to all group members
+            emit('new_group_message', {
+                'group_id': group_id,
+                'message_key': message_key,
+                'message': message_data
+            }, room=f"group_{group_id}")
+            
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
+@app.route('/api/communities', methods=['GET'])
+@login_required
+def get_communities():
+    try:
+        # Get all communities the user is a member of
+        communities = Group.query.join(GroupMember).filter(
+            GroupMember.user_id == current_user.id
+        ).all()
+        
+        return jsonify([{
+            'id': c.id,
+            'name': c.name,
+            'member_count': len(c.members),
+            'online_count': 0,  # You can implement real-time tracking later
+            'created_at': c.created_at.isoformat()
+        } for c in communities])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/communities/create', methods=['POST'])
+@login_required
+def create_community():
+    try:
+        data = request.json
+        name = data.get('name')
+        member_ids = data.get('members', [])
+        
+        # Create new community
+        community = Group(
+            name=name,
+            creator_id=current_user.id
+        )
+        
+        # Add creator as member
+        community.members.append(current_user)
+        
+        # Add other members
+        for user_id in member_ids:
+            user = User.query.get(user_id)
+            if user and user != current_user:
+                community.members.append(user)
+        
+        db.session.add(community)
+        db.session.commit()
+        
+        # Create DHT for community
+        dht = GroupDHT(community.id)
+        active_group_dhts[community.id] = dht
+        
+        return jsonify({
+            'success': True,
+            'community': {
+                'id': community.id,
+                'name': community.name,
+                'member_count': len(community.members),
+                'created_at': community.created_at.isoformat()
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500        
+
+@app.route('/api/users/available', methods=['GET'])
+@login_required
+def get_available_users():
+    try:
+        # Get all users except current user
+        users = User.query.filter(User.id != current_user.id).all()
+        return jsonify([{
+            'id': user.id,
+            'username': user.username,
+            'email': user.email
+        } for user in users])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @socketio.on('typing')
 def handle_typing(data):
@@ -942,3 +1100,16 @@ def handle_reaction(data):
         'reaction': reaction,
         'user_id': user_id
     }, room=room)
+
+@socketio.on('message')
+def handle_message(data):
+    room = data.get('room')
+    message = data.get('message')
+    username = current_user.username  # Assuming you're using Flask-Login
+    
+    # Broadcast the message to all users in the room
+    emit('message', {
+        'username': username,
+        'content': message,
+        'timestamp': datetime.now().isoformat()
+    }, room=room, broadcast=True)

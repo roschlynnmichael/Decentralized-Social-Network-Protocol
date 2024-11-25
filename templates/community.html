@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/community.css') }}">
     
     <script>
         tailwind.config = {
@@ -44,6 +45,15 @@
 
                 <!-- Right side -->
                 <div class="flex items-center space-x-4">
+                    <!-- DHT Mode Toggle -->
+                    <div class="flex items-center space-x-2">
+                        <a href="/dashboard" 
+                           class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center">
+                            <i class="fas fa-arrow-left mr-2"></i>
+                            Private Chat
+                        </a>
+                    </div>
+                    
                     <button id="createCommunityBtn" 
                             class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
                         <i class="fas fa-plus mr-2"></i>
@@ -56,6 +66,27 @@
 
     <!-- Main Content -->
     <div class="pt-16 h-screen">
+        <!-- DHT Status Bar -->
+        <div id="dhtStatus" class="hidden bg-yellow-50 border-b border-yellow-100">
+            <div class="max-w-7xl mx-auto px-4 py-3">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-network-wired text-yellow-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-yellow-800">DHT Network Status</h3>
+                        <div class="mt-1 text-sm text-yellow-700">
+                            <div class="flex items-center space-x-4">
+                                <span>Position: <span id="nodePosition" class="font-medium">-</span></span>
+                                <span>Peers: <span id="peerCount" class="font-medium">-</span></span>
+                                <span>Status: <span id="dhtConnectionStatus" class="font-medium text-green-600">Connected</span></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-12 h-full">
             <!-- Communities List Sidebar -->
             <div class="col-span-3 border-r border-border bg-surface overflow-y-auto">
@@ -70,32 +101,8 @@
                 </div>
 
                 <!-- Communities List -->
-                <div class="space-y-1 p-2">
-                    <!-- Active Community -->
-                    <div class="p-3 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white">
-                                <i class="fas fa-users"></i>
-                            </div>
-                            <div>
-                                <h3 class="font-medium">General Discussion</h3>
-                                <p class="text-sm text-gray-500">1,234 members</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Other Communities -->
-                    <div class="p-3 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500">
-                                <i class="fas fa-code"></i>
-                            </div>
-                            <div>
-                                <h3 class="font-medium">Developers</h3>
-                                <p class="text-sm text-gray-500">856 members</p>
-                            </div>
-                        </div>
-                    </div>
+                <div class="communities-list space-y-1 p-2">
+                    <!-- Communities will be dynamically added here -->
                 </div>
             </div>
 
@@ -109,53 +116,40 @@
                                 <i class="fas fa-users text-xl"></i>
                             </div>
                             <div>
-                                <h2 class="text-xl font-semibold">General Discussion</h2>
+                                <h2 class="text-xl font-semibold" id="currentCommunityName">Select a Community</h2>
                                 <p class="text-sm text-gray-500">
                                     <span class="inline-flex items-center">
                                         <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                                        234 online
+                                        <span id="onlineCount">0</span> online
                                     </span>
                                     <span class="mx-2">•</span>
-                                    1,234 members
+                                    <span id="memberCount">0</span> members
                                 </p>
                             </div>
                         </div>
-                        <button class="text-gray-500 hover:text-gray-700">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
                     </div>
                 </div>
 
-                <!-- Messages Area -->
-                <div class="flex-1 overflow-y-auto p-4 space-y-4" id="messageArea">
-                    <!-- Message -->
-                    <div class="flex space-x-3">
-                        <img src="/static/profile_pictures/default.png" 
-                             alt="User" 
-                             class="w-10 h-10 rounded-full">
-                        <div>
-                            <div class="flex items-center space-x-2">
-                                <span class="font-medium">John Doe</span>
-                                <span class="text-xs text-gray-500">2:30 PM</span>
-                            </div>
-                            <p class="text-gray-700">Hello everyone! Welcome to the general discussion.</p>
+                <!-- Main chat area -->
+                <div class="flex-1 flex flex-col">
+                    <!-- Message area -->
+                    <div id="messageArea" class="flex-1 overflow-y-auto p-4 space-y-4">
+                        <!-- Messages will be dynamically added here -->
+                    </div>
+
+                    <!-- Message input form -->
+                    <form id="messageForm" class="p-4 bg-white border-t">
+                        <div class="flex space-x-2">
+                            <input type="text" 
+                                   id="messageInput" 
+                                   class="flex-1 rounded-lg border border-gray-300 px-4 py-2" 
+                                   placeholder="Type your message...">
+                            <button type="submit" 
+                                    class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-blue-600">
+                                Send
+                            </button>
                         </div>
-                    </div>
-                </div>
-
-                <!-- Input Area -->
-                <div class="p-4 border-t border-border bg-surface">
-                    <div class="flex items-center space-x-4">
-                        <button class="text-gray-500 hover:text-gray-700">
-                            <i class="fas fa-paperclip text-xl"></i>
-                        </button>
-                        <input type="text" 
-                               placeholder="Type a message..." 
-                               class="flex-1 p-2 border border-border rounded-lg focus:outline-none focus:border-primary">
-                        <button class="bg-primary text-white p-2 rounded-lg hover:bg-blue-600 transition-colors">
-                            <i class="fas fa-paper-plane"></i>
-                        </button>
-                    </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -175,6 +169,7 @@
                                     Community Name
                                 </label>
                                 <input type="text" 
+                                       name="name"
                                        class="w-full p-2 border border-border rounded-lg focus:outline-none focus:border-primary"
                                        placeholder="Enter community name">
                             </div>
@@ -182,16 +177,19 @@
                                 <label class="block text-sm font-medium text-gray-700 mb-1">
                                     Description
                                 </label>
-                                <textarea class="w-full p-2 border border-border rounded-lg focus:outline-none focus:border-primary h-24"
+                                <textarea name="description"
+                                          class="w-full p-2 border border-border rounded-lg focus:outline-none focus:border-primary h-24"
                                           placeholder="Enter community description"></textarea>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">
-                                    Privacy
+                                    Add Members
                                 </label>
-                                <select class="w-full p-2 border border-border rounded-lg focus:outline-none focus:border-primary">
-                                    <option value="public">Public</option>
-                                    <option value="private">Private</option>
+                                <select name="members" 
+                                        multiple
+                                        id="memberSelect"
+                                        class="w-full p-2 border border-border rounded-lg focus:outline-none focus:border-primary min-h-[100px]">
+                                    <!-- Options will be populated via JavaScript -->
                                 </select>
                             </div>
                         </div>
@@ -212,11 +210,8 @@
         </div>
     </div>
 
-    <script>
-        // Show/Hide Create Community Modal
-        document.getElementById('createCommunityBtn').addEventListener('click', () => {
-            document.getElementById('createCommunityModal').classList.remove('hidden');
-        });
-    </script>
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/dht_chat.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/community.js') }}"></script>
 </body>
 </html>
