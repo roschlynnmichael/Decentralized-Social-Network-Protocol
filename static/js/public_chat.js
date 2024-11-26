@@ -38,9 +38,20 @@ document.addEventListener('DOMContentLoaded', function() {
             // Get initial chat history
             this.socket.emit('get_chat_history');
             
-            // Add handler for chat history
+            // Update socket listeners
             this.socket.on('chat_history', (data) => {
                 this.displayChatHistory(data.messages);
+            });
+
+            // Listen for new messages
+            this.socket.on('new_message', (data) => {
+                if (data && data.messages) {
+                    // Handle array of messages
+                    data.messages.forEach(msg => this.displayMessage(msg));
+                } else if (data) {
+                    // Handle single message
+                    this.displayMessage(data);
+                }
             });
 
             // Add clear chat button handler
@@ -64,27 +75,34 @@ document.addEventListener('DOMContentLoaded', function() {
             const content = this.messageInput.value.trim();
             if (!content) return;
 
-            this.socket.emit('store_message', { 
-                message: {
-                    content: content
-                }
-            });
+            try {
+                this.socket.emit('send_message', { 
+                    message: content,
+                    timestamp: Date.now() / 1000  // Add timestamp
+                });
 
-            // Clear input
-            this.messageInput.value = '';
-            
-            // Refresh chat history after sending
-            this.socket.emit('get_chat_history');
+                // Clear input after successful send
+                this.messageInput.value = '';
+            } catch (error) {
+                console.error('Error sending message:', error);
+            }
         }
 
         displayMessage(message) {
-            if (!message.id || this.processedMessages.has(message.id)) {
+            // Add check for empty or invalid message
+            if (!message || (!message.id && !message.content)) {
+                console.warn('Invalid message received:', message);
+                return;
+            }
+
+            // Check for duplicate messages
+            if (message.id && this.processedMessages.has(message.id)) {
                 return;
             }
             this.processedMessages.add(message.id);
 
             const messageDiv = document.createElement('div');
-            messageDiv.className = `flex ${message.sender_id === currentUserId ? 'justify-end' : 'justify-start'}`;
+            messageDiv.className = `flex ${message.sender_id === currentUserId ? 'justify-end' : 'justify-start'} mb-4 message-animate-in`;
 
             messageDiv.innerHTML = `
                 <div class="max-w-[70%] ${message.sender_id === currentUserId ? 'bg-blue-500 text-white' : 'bg-gray-100'} 

@@ -1710,6 +1710,7 @@ def handle_message(data):
 @socketio.on('connect')
 def handle_connect(auth=None):
     if current_user.is_authenticated:
+        join_room('p2p_chat')
         if current_user.id not in active_users:
             active_users[current_user.id] = set()
         active_users[current_user.id].add(request.sid)
@@ -1882,36 +1883,37 @@ def handle_get_user_info():
         'username': current_user.username
     })
 
-@socketio.on('store_message')
+@socketio.on('send_message')
 @authenticated_only
 def handle_store_message(data):
     try:
-        content = data['message']['content']
+        content = data['message']
+        timestamp = data.get('timestamp', time.time())
         user_id = str(current_user.id)
         
         # Get or create chat node
         if user_id not in chat_nodes:
             chat_nodes[user_id] = ChatNode(user_id, current_user.username)
         
-        # Create and store message
-        result = chat_nodes[user_id].broadcast_message(content)
+        # Create message structure
+        message = {
+            'id': hashlib.sha256(f"{user_id}-{content}-{timestamp}".encode()).hexdigest(),
+            'sender_id': user_id,
+            'username': current_user.username,
+            'content': content,
+            'timestamp': timestamp
+        }
         
-        # Update bucket hash
+        # Store message and get updated bucket hash
+        result = chat_nodes[user_id].broadcast_message(content)
         bucket_manager.update_bucket_hash(user_id, result['bucket_hash'])
         
-        # Send decrypted message to clients
-        message = result['message']
-        message['content'] = content  # Use original content for display
+        # Emit new message to all clients in p2p_chat room
+        emit('new_message', message, broadcast=True, room='p2p_chat')
         
-        # Broadcast to all clients (including sender)
-        emit('chat_message', {
-            'message': message
-        }, broadcast=True)
-        
-        return {'success': True, 'bucket_hash': result['bucket_hash']}
     except Exception as e:
         print(f"Error storing message: {e}")
-        return {'success': False, 'error': str(e)}
+        emit('error', {'message': str(e)})
 
 @socketio.on('clear_chat_history')
 @authenticated_only
@@ -2537,4 +2539,41 @@ def handle_community_message(data):
         
     except Exception as e:
         app.logger.error(f"Error handling community message: {str(e)}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('public_chat_message')
+@authenticated_only
+def handle_public_chat_message(data):
+    try:
+        content = data.get('message', '').strip()
+        if not content:
+            return
+            
+        user_id = str(current_user.id)
+        
+        # Get user's chat node
+        node = chat_nodes.get(user_id)
+        if not node:
+            node = ChatNode(user_id, current_user.username)
+            chat_nodes[user_id] = node
+            
+        # Create and broadcast message
+        result = node.broadcast_message(content)
+        
+        # Update bucket hash in manager
+        bucket_manager.update_bucket_hash(user_id, result['bucket_hash'])
+        
+        # Send to all peers
+        emit('new_message', {
+            'message': {
+                'id': result['message_id'],
+                'content': content,
+                'sender_id': current_user.id,
+                'username': current_user.username,
+                'timestamp': result['timestamp']
+            },
+            'bucket_hash': result['bucket_hash']
+        }, room='p2p_chat')
+        
+    except Exception as e:
         emit('error', {'message': str(e)})
