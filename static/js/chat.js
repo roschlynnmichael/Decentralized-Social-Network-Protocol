@@ -68,11 +68,11 @@ function handleFileSelection(event) {
 
 function shareFile(file) {
     if (!file) return;
-
+    
     const formData = new FormData();
     formData.append('file', file);
-
-    // Show initial status
+    formData.append('filename', file.name);
+    
     const uploadId = `upload_${Date.now()}`;
     showUploadStatus('Starting upload...', 0, {
         steps: [
@@ -81,25 +81,33 @@ function shareFile(file) {
         ]
     }, uploadId);
 
-    // Start the upload
     fetch('/api/share_file', {
         method: 'POST',
         body: formData
     })
     .then(response => response.json())
-    .then(response => {
-        if (response.success) {
-            updateUploadStatus('Upload in progress...', 30, {
+    .then(data => {
+        if (data.success) {
+            // Create message content with proper file link
+            const message = `Shared file: [Download](${data.file_link})`;
+            
+            // Send the message using the existing sendMessage function
+            sendMessage(currentChatFriendId, message);
+            
+            // Update upload status
+            updateUploadStatus('Upload complete!', 100, {
                 steps: [
                     { id: 'prepare', label: 'File prepared', status: 'complete' },
-                    { id: 'ipfs', label: 'IPFS Upload in progress', status: 'current' }
+                    { id: 'ipfs', label: 'IPFS Upload complete', status: 'complete' }
                 ]
             }, uploadId);
-
-            // Poll for upload status
-            checkUploadStatus(response.task_id, uploadId);
+            
+            // Remove status after delay
+            setTimeout(() => {
+                removeUploadStatus(uploadId);
+            }, 3000);
         } else {
-            throw new Error(response.error || 'Failed to start upload');
+            throw new Error(data.error || 'Upload failed');
         }
     })
     .catch(error => {
@@ -747,3 +755,28 @@ socket.on('upload_complete', (data) => {
 socket.on('upload_error', (data) => {
     handleUploadError(data.error, data.uploadId);
 });
+
+// Update the message display function to handle file messages
+function displayMessage(message) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${message.sender_id === currentUserId ? 'sent' : 'received'}`;
+    
+    let content = message.content;
+    if (message.type === 'file') {
+        // Create proper file download link
+        content = `Shared file: <a href="${message.file_link}" 
+            class="text-blue-500 hover:text-blue-700 underline" 
+            download="${message.filename}">${message.filename}</a>`;
+    }
+    
+    messageDiv.innerHTML = `
+        <div class="message-content">
+            <div class="message-sender">${message.username}</div>
+            <div class="message-text">${content}</div>
+            <div class="message-time">${formatTime(message.timestamp)}</div>
+        </div>
+    `;
+    
+    document.getElementById('messageArea').appendChild(messageDiv);
+    scrollToBottom();
+}

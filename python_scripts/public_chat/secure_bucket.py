@@ -460,11 +460,26 @@ class SecureBucket:
             print(f"Error deleting file: {e}")
             return False
 
-    def clear_chat_history(self):
+    def clear_chat_history(self) -> Dict:
         """Clear all chat history from bucket"""
-        # Check if there are any messages to clear
-        if not self.bucket_structure['chat_history']:
-            return self._save_bucket()  # Return current hash if no messages to clear
-        
-        self.bucket_structure['chat_history'] = []
-        return self._save_bucket()
+        try:
+            # Clear the chat history array
+            self.bucket_structure['chat_history'] = []
+            
+            # Save the updated bucket to IPFS
+            new_hash = self._save_bucket()
+            
+            # Update the bucket manager with new hash
+            from app import bucket_manager
+            bucket_manager.update_bucket_hash(self.node_id, new_hash)
+            
+            return {
+                'success': True,
+                'bucket_hash': new_hash
+            }
+        except Exception as e:
+            print(f"Error clearing chat history: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }

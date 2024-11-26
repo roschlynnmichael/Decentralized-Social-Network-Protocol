@@ -68,12 +68,23 @@ class ChatNode:
 
     def clear_chat_history(self) -> Dict:
         """Clear chat history from bucket"""
-        # Clear chat history
-        self.secure_bucket.clear_chat_history()
-        
-        # Get new bucket hash
-        bucket_hash = self.secure_bucket._save_bucket()
-        
-        return {
-            'bucket_hash': bucket_hash
-        }
+        try:
+            # Clear chat history using secure bucket
+            result = self.secure_bucket.clear_chat_history()
+            
+            if result['success']:
+                return {
+                    'success': True,
+                    'bucket_hash': result['bucket_hash']
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': result.get('error', 'Unknown error occurred')
+                }
+        except Exception as e:
+            print(f"Error in clear_chat_history: {e}")
+            return {
+                'success': False,
+                'message': str(e)
+            }

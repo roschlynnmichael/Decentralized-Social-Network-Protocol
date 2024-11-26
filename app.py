@@ -1,5 +1,6 @@
 import sys
 import os
+import io
 from functools import wraps
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -831,6 +832,9 @@ def handle_file_upload(file_content, filename, user_id, task_id):
 
         # Upload to IPFS
         ipfs_hash = ipfs_handler.add_content(encrypted_content)
+        
+        if not ipfs_hash:
+            raise Exception("Failed to upload to IPFS")
 
         # Store the successful result
         upload_status[task_id] = {
@@ -841,9 +845,12 @@ def handle_file_upload(file_content, filename, user_id, task_id):
             'file_link': f'/api/download_file/{ipfs_hash}/{filename}'
         }
         
-        # Emit the completion event via Socket.IO
-        socketio.emit('upload_complete', upload_status[task_id], room=f"user_{user_id}")
-        
+        # Emit success event
+        socketio.emit('upload_complete', {
+            'uploadId': task_id,
+            'file_link': f'/api/download_file/{ipfs_hash}/{filename}'
+        }, room=f"user_{user_id}")
+
     except Exception as e:
         app.logger.error(f"Error in file upload task: {str(e)}")
         upload_status[task_id] = {
@@ -873,22 +880,28 @@ def share_file():
         if not file.filename:
             return jsonify({'success': False, 'error': 'No file selected'})
             
-        # Get user's chat node
-        user_id = str(current_user.id)
-        if user_id not in chat_nodes:
-            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
-            
-        # Add file to secure bucket
-        file_content = file.read()
-        file_info = chat_nodes[user_id].secure_bucket.add_file(file_content, file.filename)
+        # Generate task ID
+        task_id = f"upload_{int(time.time())}_{current_user.id}"
         
-        # Update bucket hash in manager
-        bucket_hash = chat_nodes[user_id].secure_bucket._save_bucket()
-        bucket_manager.update_bucket_hash(user_id, bucket_hash)
+        # Read file content
+        file_content = file.read()
+        
+        # Encrypt and upload to IPFS
+        encrypted_content = message_handler.encrypt_file(file_content)
+        ipfs_hash = ipfs_handler.add_content(encrypted_content)
+        
+        if not ipfs_hash:
+            raise Exception("Failed to upload to IPFS")
+            
+        # Generate download link
+        file_link = f'/api/download_file/{ipfs_hash}/{secure_filename(file.filename)}'
         
         return jsonify({
             'success': True,
-            'file_info': file_info
+            'task_id': task_id,
+            'file_link': file_link,
+            'ipfs_hash': ipfs_hash,
+            'filename': secure_filename(file.filename)
         })
         
     except Exception as e:
@@ -908,28 +921,32 @@ def get_upload_status(task_id):
 @login_required
 def download_file(ipfs_hash, filename):
     try:
-        encrypted_data = ipfs_handler.get_content(ipfs_hash)
-        decrypted_data = message_handler.decrypt_file(encrypted_data)
+        # Get file content from IPFS
+        encrypted_content = ipfs_handler.get_content(ipfs_hash)
+        if not encrypted_content:
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+            
+        # Decrypt the content
+        decrypted_content = message_handler.decrypt_file(encrypted_content)
         
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f'_{filename}') as temp_file:
-            temp_file.write(decrypted_data)
-            temp_path = temp_file.name
-
-        # Send the file
-        return send_file(temp_path, as_attachment=True, download_name=filename)
-
+        # Create response with proper headers
+        response = send_file(
+            io.BytesIO(decrypted_content),
+            mimetype=mimetypes.guess_type(filename)[0] or 'application/octet-stream',
+            as_attachment=True,
+            download_name=filename  # This ensures proper filename with extension
+        )
+        
+        # Add headers to prevent caching
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        
+        return response
+        
     except Exception as e:
-        app.logger.error(f"Error downloading file: {str(e)}")
-        return jsonify({"error": f"An error occurred while downloading the file: {str(e)}"}), 500
-
-    finally:
-        # Clean up the temporary file
-        if 'temp_path' in locals():
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                app.logger.error(f"Error removing temporary file: {str(e)}")
+        app.logger.error(f"Download error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/sign_chat/<int:friend_id>', methods=['POST'])
 @login_required
@@ -1620,33 +1637,50 @@ def on_join(data):
 @socketio.on('message')
 @login_required
 def handle_message(data):
-    room = data.get('room')
-    if not room or not room.startswith('community_'):
-        return
-    
-    community_id = int(room.split('_')[1])
-    
-    message_data = {
-        'username': current_user.username,
-        'content': data.get('content'),
-        'message': data.get('message'),
-        'timestamp': datetime.utcnow().isoformat(),
-        'sender_id': current_user.id,
-        'file_info': data.get('fileInfo')
-    }
-    
-    # Save to database
-    message = Message(
-        community_id=community_id,
-        sender_id=current_user.id,
-        username=current_user.username,
-        content=data.get('content'),
-        file_info=data.get('fileInfo')
-    )
-    db.session.add(message)
-    db.session.commit()
-    
-    emit('message', message_data, room=room)
+    try:
+        content = data.get('content')
+        message_type = data.get('type', 'text')
+        filename = data.get('filename')
+        file_link = data.get('file_link')
+        
+        room = data.get('room')
+        if not room or not room.startswith('community_'):
+            return
+        
+        community_id = int(room.split('_')[1])
+        
+        # Create message object
+        message = Message(
+            community_id=community_id,
+            sender_id=current_user.id,
+            username=current_user.username,
+            content=content,
+            message_type=message_type
+        )
+        
+        if message_type == 'file':
+            message.filename = filename
+            message.file_link = file_link
+            
+        db.session.add(message)
+        db.session.commit()
+        
+        # Emit to room
+        message_data = {
+            'sender_id': current_user.id,
+            'username': current_user.username,
+            'content': content,
+            'timestamp': datetime.utcnow().isoformat(),
+            'type': message_type,
+            'filename': filename,
+            'file_link': file_link
+        }
+        
+        emit('message', message_data, room=room)
+        
+    except Exception as e:
+        app.logger.error(f"Error handling message: {str(e)}")
+        emit('error', {'message': str(e)})
 
 @socketio.on('connect')
 def handle_connect(auth=None):
