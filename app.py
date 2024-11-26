@@ -2406,3 +2406,36 @@ def handle_flood_upload():
     except Exception as e:
         print(f"Upload error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/flood_download/<file_id>')
+@login_required
+def handle_flood_download(file_id):
+    try:
+        if file_id not in shared_files:
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+            
+        file_info = shared_files[file_id]
+        
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(file_info['data'])
+            temp_path = temp_file.name
+            
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                app.logger.error(f"Error cleaning up temp file: {e}")
+            return response
+            
+        return send_file(
+            temp_path,
+            as_attachment=True,
+            download_name=file_info['name'],
+            max_age=0
+        )
+        
+    except Exception as e:
+        app.logger.error(f"Download error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500

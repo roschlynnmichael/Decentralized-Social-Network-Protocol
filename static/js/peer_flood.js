@@ -113,7 +113,8 @@ function displaySearchResults(results) {
                 <div class="text-xs text-gray-400">From: ${file.peer}</div>
             </div>
             <button onclick="downloadFile('${file.fileId}')"
-                    class="bg-blue-500 hover:bg-blue-700 text-white text-sm py-1 px-3 rounded">
+                    class="bg-blue-500 hover:bg-blue-700 text-white text-sm py-1 px-3 rounded flex items-center gap-2">
+                <i class="fas fa-download"></i>
                 Download
             </button>
         </div>
