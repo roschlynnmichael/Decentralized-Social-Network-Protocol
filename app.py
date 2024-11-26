@@ -2041,3 +2041,85 @@ def handle_get_chat_history():
     except Exception as e:
         print(f"Error getting chat history: {e}")
         emit('error', {'message': str(e)})
+
+@app.route('/peer_files')
+@login_required
+def peer_files():
+    return render_template('peer_files.html')
+
+@app.route('/api/peer_files', methods=['GET'])
+@login_required
+def get_peer_files():
+    try:
+        users_data = {}
+        print(f"Getting peer files. Current user: {current_user.username}")
+        print(f"Available buckets: {bucket_manager.buckets_data.keys()}")
+        
+        # Get all users with buckets
+        for user_id, bucket_info in bucket_manager.buckets_data.items():
+            if user_id != str(current_user.id):  # Exclude current user
+                # Get username from database
+                user = User.query.get(int(user_id))
+                if user:
+                    print(f"Processing user {user.username} with bucket hash {bucket_info.get('hash')}")
+                    users_data[user_id] = {
+                        'username': user.username,
+                        'bucket_hash': bucket_info.get('hash'),
+                        'files': []
+                    }
+                    
+                    # Get files if user has a chat node
+                    if user_id in chat_nodes:
+                        node = chat_nodes[user_id]
+                        files = node.secure_bucket.get_files()
+                        print(f"Found {len(files)} files for user {user.username}")
+                        users_data[user_id]['files'] = files
+                    else:
+                        print(f"No chat node found for user {user.username}")
+        
+        return jsonify({
+            'success': True,
+            'users': users_data
+        })
+    except Exception as e:
+        print(f"Error in get_peer_files: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/peer_file/<user_id>/<file_id>/<filename>')
+@login_required
+def download_peer_file(user_id, file_id, filename):
+    try:
+        # Get the peer's chat node
+        if user_id not in chat_nodes:
+            return jsonify({'error': 'Peer not found'}), 404
+            
+        node = chat_nodes[user_id]
+        
+        # Get file content from peer's secure bucket
+        file_content = node.secure_bucket.get_file_content(file_id)
+        if not file_content:
+            return jsonify({'error': 'File not found'}), 404
+            
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(file_content)
+            temp_path = temp_file.name
+            
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                app.logger.error(f"Error cleaning up temp file: {e}")
+            return response
+            
+        return send_file(
+            temp_path,
+            as_attachment=True,
+            download_name=filename,
+            max_age=0
+        )
+        
+    except Exception as e:
+        app.logger.error(f"Error downloading peer file: {str(e)}")
+        return jsonify({'error': str(e)}), 500

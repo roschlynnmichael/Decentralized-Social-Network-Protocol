@@ -409,12 +409,17 @@ class SecureBucket:
     def get_files(self) -> list:
         """Get list of files in bucket"""
         try:
+            # Ensure files dictionary exists in bucket structure
+            if 'files' not in self.bucket_structure:
+                self.bucket_structure['files'] = {}
+                
             # Convert dictionary values to list and sort by timestamp
             files = list(self.bucket_structure.get('files', {}).values())
-            print(f"Retrieved {len(files)} files from bucket structure")
+            print(f"Retrieved {len(files)} files from bucket structure for user {self.username}")
             return sorted(files, key=lambda x: x['timestamp'], reverse=True)
         except Exception as e:
             print(f"Error getting files: {e}")
+            print(f"Current bucket structure: {self.bucket_structure}")
             return []
 
     def delete_file(self, file_id: str) -> bool:

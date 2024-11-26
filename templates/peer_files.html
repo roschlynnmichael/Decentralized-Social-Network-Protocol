@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peer Files</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen p-6">
+        <!-- Header -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="flex justify-between items-center">
+                <h1 class="text-2xl font-bold text-gray-800">Peer Files</h1>
+                <a href="{{ url_for('public_chat') }}" class="text-blue-600 hover:text-blue-800">
+                    <i class="fas fa-arrow-left mr-2"></i>Back to Chat
+                </a>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="max-w-7xl mx-auto">
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <!-- User Selection -->
+                <div class="p-4 bg-gray-50 border-b">
+                    <div class="space-y-2">
+                        <select id="userSelect" class="w-full rounded-lg border-gray-300">
+                            <option value="">Select a peer...</option>
+                        </select>
+                        <p class="text-xs text-gray-500" id="selectedBucketHash"></p>
+                    </div>
+                </div>
+
+                <!-- Files List -->
+                <div class="p-4">
+                    <div id="filesList" class="space-y-2">
+                        <!-- Files will be listed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/peer_file.js') }}"></script>
+</body>
+</html>
