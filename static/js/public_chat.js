@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function createFileElement(file) {
         const div = document.createElement('div');
-        div.className = 'bg-white p-4 rounded-lg shadow flex items-center justify-between space-x-4';
+        div.className = 'bg-white p-3 rounded-lg shadow flex items-center justify-between space-x-4 min-h-[60px]';
         
         // Left side with file info
         const fileInfo = document.createElement('div');
@@ -123,14 +123,16 @@ document.addEventListener('DOMContentLoaded', function() {
         fileName.title = file.name; // Show full filename on hover
         fileName.textContent = file.name;
         
-        // Status/Time info
+        // File size/time info
         const fileDetails = document.createElement('p');
-        fileDetails.className = 'text-sm text-gray-500';
-        if (file.status) {
-            fileDetails.textContent = file.status;
+        fileDetails.className = 'text-xs text-gray-500 truncate';
+        
+        // Handle uploading status differently
+        if (file.status === 'Uploading...') {
+            fileDetails.textContent = 'Uploading...';
+            div.classList.add('opacity-75');
         } else {
-            const date = new Date(file.timestamp * 1000);
-            fileDetails.textContent = date.toLocaleString();
+            fileDetails.textContent = formatFileSize(file.size || 0);
         }
         
         fileInfo.appendChild(fileName);
@@ -138,15 +140,15 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Right side with actions
         const actions = document.createElement('div');
-        actions.className = 'flex-shrink-0 flex items-center space-x-2';
+        actions.className = 'flex items-center space-x-2 flex-shrink-0';
         
-        // Download button
-        if (!file.status) { // Only show for completed uploads
+        // Only show actions if file is not uploading
+        if (!file.status) {
+            // Download button
             const downloadBtn = document.createElement('button');
             downloadBtn.className = 'text-blue-600 hover:text-blue-800';
             downloadBtn.innerHTML = '<i class="fas fa-download"></i>';
             downloadBtn.onclick = () => {
-                // Create a temporary anchor element
                 const link = document.createElement('a');
                 link.href = `/api/share_file/${file.id}/${encodeURIComponent(file.name)}`;
                 link.download = file.name;
@@ -162,12 +164,27 @@ document.addEventListener('DOMContentLoaded', function() {
             deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
             deleteBtn.onclick = () => window.deleteFile(file.id);
             actions.appendChild(deleteBtn);
+        } else {
+            // Show spinner for uploading files
+            const spinner = document.createElement('div');
+            spinner.className = 'text-blue-500';
+            spinner.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            actions.appendChild(spinner);
         }
         
         div.appendChild(fileInfo);
         div.appendChild(actions);
         
         return div;
+    }
+
+    // Helper function to format file size
+    function formatFileSize(bytes) {
+        if (!bytes || isNaN(bytes)) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
     // Drag and drop handling
@@ -211,4 +228,77 @@ document.addEventListener('DOMContentLoaded', function() {
             socket.emit('delete_file', { fileId });
         }
     };
+
+    // Initialize chat functionality
+    function initChat() {
+        const messageInput = document.getElementById('messageInput');
+        const sendMessageBtn = document.getElementById('sendMessageBtn');
+        const chatMessages = document.getElementById('chatMessages');
+
+        // Handle send message
+        sendMessageBtn.addEventListener('click', () => {
+            sendMessage();
+        });
+
+        // Handle enter key
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Listen for new messages
+        socket.on('new_message', (data) => {
+            appendMessage(data.message);
+        });
+
+        // Listen for chat history
+        socket.on('chat_history', (data) => {
+            chatMessages.innerHTML = ''; // Clear existing messages
+            data.messages.forEach(message => {
+                appendMessage(message);
+            });
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+    }
+
+    // Send a message
+    function sendMessage() {
+        const messageInput = document.getElementById('messageInput');
+        const content = messageInput.value.trim();
+        
+        if (content) {
+            socket.emit('send_message', { message: content });
+            messageInput.value = ''; // Clear input
+        }
+    }
+
+    // Append a message to the chat
+    function appendMessage(message) {
+        const chatMessages = document.getElementById('chatMessages');
+        const messageDiv = document.createElement('div');
+        const isOwnMessage = message.sender_id === currentUserId;
+        
+        messageDiv.className = `flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`;
+        
+        messageDiv.innerHTML = `
+            <div class="max-w-[70%] ${isOwnMessage ? 'bg-blue-500 text-white' : 'bg-gray-100'} rounded-lg px-4 py-2">
+                <div class="text-xs ${isOwnMessage ? 'text-blue-100' : 'text-gray-500'} mb-1">
+                    ${message.username}
+                </div>
+                <div class="break-words">
+                    ${message.content}
+                </div>
+                <div class="text-xs ${isOwnMessage ? 'text-blue-100' : 'text-gray-500'} mt-1">
+                    ${new Date(message.timestamp * 1000).toLocaleTimeString()}
+                </div>
+            </div>
+        `;
+        
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Add this to your existing initialization code
+    initChat();
 });
