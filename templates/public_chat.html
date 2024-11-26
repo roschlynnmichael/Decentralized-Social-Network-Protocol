@@ -75,30 +75,39 @@
 
         <!-- Main Content Area -->
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <!-- Full-width Chat Section - Moved to top -->
-            <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
-                <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
-                    <h2 class="text-lg font-semibold text-gray-700">Public Chat</h2>
+            <!-- Full-width Chat Section -->
+            <div class="bg-white rounded-xl shadow-lg overflow-hidden mb-6 border border-gray-100">
+                <!-- Chat Header -->
+                <div class="p-4 bg-gradient-to-r from-blue-500 to-blue-600 border-b flex justify-between items-center">
+                    <div class="flex items-center space-x-3">
+                        <div class="p-2 bg-white/10 rounded-lg">
+                            <i class="fas fa-comments text-white"></i>
+                        </div>
+                        <h2 class="text-lg font-semibold text-white">Public Chat</h2>
+                    </div>
                     <button id="clearChatBtn" 
-                            class="inline-flex items-center px-3 py-1 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600">
+                            class="inline-flex items-center px-3 py-2 bg-white/10 text-white text-sm rounded-lg hover:bg-white/20 transition-all duration-200">
                         <i class="fas fa-trash-alt mr-2"></i>
                         Clear History
                     </button>
                 </div>
-                <div class="p-4">
-                    <!-- Chat Messages Container with fixed height -->
-                    <div id="chatMessages" class="h-[300px] overflow-y-auto space-y-4 mb-4 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
-                        <!-- Messages will appear here -->
+
+                <div class="p-6">
+                    <!-- Chat Messages Container -->
+                    <div id="chatMessages" 
+                         class="h-[400px] overflow-y-auto space-y-4 mb-6 pr-4 scrollbar-thin scrollbar-thumb-blue-200 scrollbar-track-gray-50 scroll-smooth">
+                        <!-- Messages will be inserted here -->
                     </div>
                     
                     <!-- Message Input -->
-                    <div class="flex space-x-2">
+                    <div class="flex items-center space-x-3 bg-gray-50 p-3 rounded-xl">
                         <input type="text" 
                                id="messageInput" 
-                               class="flex-1 rounded-lg border-gray-300"
-                               placeholder="Type your message...">
+                               class="flex-1 px-4 py-2 bg-white rounded-lg border-0 focus:ring-2 focus:ring-blue-500 transition-all duration-200"
+                               placeholder="Type your message..."
+                               autocomplete="off">
                         <button id="sendMessageBtn" 
-                                class="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                                class="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 shadow-sm hover:shadow-md">
                             <i class="fas fa-paper-plane mr-2"></i>
                             Send
                         </button>

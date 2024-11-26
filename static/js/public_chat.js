@@ -104,16 +104,34 @@ document.addEventListener('DOMContentLoaded', function() {
             const messageDiv = document.createElement('div');
             messageDiv.className = `flex ${message.sender_id === currentUserId ? 'justify-end' : 'justify-start'} mb-4 message-animate-in`;
 
+            const isOwnMessage = message.sender_id === currentUserId;
+            
             messageDiv.innerHTML = `
-                <div class="max-w-[70%] ${message.sender_id === currentUserId ? 'bg-blue-500 text-white' : 'bg-gray-100'} 
-                    rounded-lg px-4 py-2">
-                    <div class="text-xs ${message.sender_id === currentUserId ? 'text-blue-100' : 'text-gray-500'} mb-1">
-                        ${message.username}
+                <div class="max-w-[70%] ${isOwnMessage 
+                    ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white' 
+                    : 'bg-gray-50 border border-gray-100'} 
+                    rounded-xl px-4 py-3 shadow-sm">
+                    <div class="flex items-center space-x-2 mb-1">
+                        <div class="w-6 h-6 rounded-full ${isOwnMessage 
+                            ? 'bg-white/20' 
+                            : 'bg-gray-200'} 
+                            flex items-center justify-center">
+                            <i class="fas fa-user text-xs ${isOwnMessage 
+                                ? 'text-white/70' 
+                                : 'text-gray-500'}"></i>
+                        </div>
+                        <div class="text-sm ${isOwnMessage 
+                            ? 'text-white/90' 
+                            : 'text-gray-600'} font-medium">
+                            ${message.username}
+                        </div>
                     </div>
-                    <div class="break-words">
+                    <div class="break-words text-sm">
                         ${this.escapeHtml(message.content)}
                     </div>
-                    <div class="text-xs ${message.sender_id === currentUserId ? 'text-blue-100' : 'text-gray-500'} mt-1">
+                    <div class="text-xs ${isOwnMessage 
+                        ? 'text-white/70' 
+                        : 'text-gray-400'} mt-2 text-right">
                         ${new Date(message.timestamp * 1000).toLocaleTimeString()}
                     </div>
                 </div>
