@@ -67,6 +67,8 @@ class P2PFloodNetwork:
                     self.handle_search_response(message)
                 elif message['type'] == 'file_request':
                     self.handle_file_request(message, connection)
+                elif message['type'] == 'file_response':
+                    self.handle_file_response(message)
                     
                 # Forward the message to other peers (flooding)
                 if message.get('ttl', 0) > 0:
@@ -135,15 +137,38 @@ class P2PFloodNetwork:
 
     def handle_file_request(self, message, connection):
         """Handle request for file download"""
-        filename = message['filename']
-        file_path = Path(self.temp_directory) / filename
-        
-        if file_path.exists():
-            try:
-                with open(file_path, 'rb') as f:
-                    connection.send(f.read())
-            except Exception as e:
-                print(f"Error sending file: {e}")
+        try:
+            filename = message.get('filename')
+            file_id = message.get('file_id')
+            
+            if not filename or not file_id:
+                return
+                
+            # Get file content from local storage
+            file_content = None
+            
+            # Import chat_nodes here to avoid circular imports
+            from app import chat_nodes
+            
+            # Find the node that has this file
+            node_id = next((id for id, node in chat_nodes.items() 
+                           if node.p2p_network == self), None)
+            if node_id:
+                node = chat_nodes[node_id]
+                file_content = node.secure_bucket.get_file_content(file_id)
+                        
+            if file_content:
+                # Send file content back to requester
+                response = {
+                    'type': 'file_response',
+                    'id': f"file_{message.get('id')}",
+                    'filename': filename,
+                    'content': file_content.hex()  # Convert bytes to hex string
+                }
+                connection.send(json.dumps(response).encode())
+                
+        except Exception as e:
+            print(f"Error handling file request: {e}")
 
     def connect_to_peer(self, host, port):
         """Establish connection to another peer"""
@@ -208,3 +233,50 @@ class P2PFloodNetwork:
         except Exception as e:
             print(f"Error getting matching files: {e}")
             return []
+
+    def request_file(self, filename, source):
+        """Request a file from a specific peer"""
+        try:
+            host, port, file_id = source
+            request_msg = {
+                'type': 'file_request',
+                'id': f"request_{time.time()}_{self.username}",
+                'filename': filename,
+                'file_id': file_id,
+                'requester': {
+                    'host': self.host,
+                    'port': self.port
+                }
+            }
+            
+            # Connect to the source peer if not already connected
+            if (host, port) not in self.peers:
+                if not self.connect_to_peer(host, port):
+                    raise Exception("Could not connect to peer")
+                
+            # Send request
+            self.peers[(host, port)].send(json.dumps(request_msg).encode())
+            
+        except Exception as e:
+            print(f"Error requesting file: {e}")
+            raise
+
+    def handle_file_response(self, message):
+        """Handle incoming file response"""
+        try:
+            filename = message['filename']
+            content = bytes.fromhex(message['content'])  # Convert hex string back to bytes
+            
+            # Save file to temp directory
+            file_path = Path(self.temp_directory) / filename
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            
+            # Emit download ready event
+            from app import socketio
+            socketio.emit('download_ready', {
+                'url': f'/download_temp/{filename}'
+            })
+            
+        except Exception as e:
+            print(f"Error handling file response: {e}")

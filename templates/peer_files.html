@@ -3,64 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Peer Files</title>
+    <title>P2P Flood File Sharing</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100">
     <div class="min-h-screen p-6">
-        <!-- Header -->
         <div class="max-w-7xl mx-auto mb-6">
             <div class="flex justify-between items-center">
-                <h1 class="text-2xl font-bold text-gray-800">Peer Files</h1>
-                <a href="{{ url_for('public_chat') }}" class="text-blue-600 hover:text-blue-800">
-                    <i class="fas fa-arrow-left mr-2"></i>Back to Chat
-                </a>
+                <h1 class="text-2xl font-bold text-gray-800">P2P Flood Network</h1>
+                <div class="text-sm text-gray-600">Connected Peers: <span id="peerCount">0</span></div>
             </div>
         </div>
 
-        <!-- Main Content -->
         <div class="max-w-7xl mx-auto">
-            <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                <!-- Search Section -->
-                <div class="p-4 bg-gray-50 border-b">
-                    <div class="flex space-x-2">
-                        <input type="text" 
-                               id="searchInput" 
-                               class="flex-1 rounded-lg border-gray-300"
-                               placeholder="Search for files across peers...">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <!-- File Upload -->
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Share File</label>
+                    <div class="flex gap-4">
+                        <input type="file" id="fileInput" class="hidden" />
+                        <button onclick="document.getElementById('fileInput').click()" 
+                                class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                            Select File
+                        </button>
+                        <div id="selectedFile" class="flex-1 py-2"></div>
+                    </div>
+                </div>
+
+                <!-- Search Files -->
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Search Network</label>
+                    <div class="flex gap-4">
+                        <input type="text" id="searchInput" 
+                               class="flex-1 border rounded py-2 px-3" 
+                               placeholder="Search for files...">
                         <button id="searchBtn" 
-                                class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
-                            <i class="fas fa-search mr-2"></i>Search
+                                class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                            Search
                         </button>
                     </div>
                 </div>
 
-                <!-- File Upload Section -->
-                <div class="p-4 border-b">
-                    <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
-                        <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
-                            <p class="text-sm text-gray-500">Share File with Peers</p>
-                            <p class="text-xs text-gray-500">(Max: 10MB)</p>
-                        </div>
-                        <input id="fileInput" type="file" class="hidden" />
-                    </label>
-                </div>
-
-                <!-- Results Section -->
-                <div class="p-4">
-                    <h3 class="text-sm font-medium text-gray-700 mb-3">Search Results</h3>
-                    <div id="searchResults" class="space-y-2 max-h-[200px] overflow-y-auto">
-                        <!-- Search results will appear here -->
+                <!-- Search Results -->
+                <div class="mb-6">
+                    <h3 class="text-gray-700 text-sm font-bold mb-2">Search Results</h3>
+                    <div id="searchResults" class="border rounded-lg p-4 min-h-[100px] max-h-[200px] overflow-y-auto">
+                        <div class="text-gray-500 text-center">Search results will appear here</div>
                     </div>
                 </div>
 
-                <!-- Available Files Section -->
-                <div class="p-4 border-t">
-                    <h3 class="text-sm font-medium text-gray-700 mb-3">My Shared Files</h3>
-                    <div id="mySharedFiles" class="space-y-2 max-h-[200px] overflow-y-auto">
-                        <!-- Shared files will appear here -->
+                <!-- My Shared Files -->
+                <div>
+                    <h3 class="text-gray-700 text-sm font-bold mb-2">My Shared Files</h3>
+                    <div id="myFiles" class="border rounded-lg p-4 min-h-[100px] max-h-[200px] overflow-y-auto">
+                        <div class="text-gray-500 text-center">Your shared files will appear here</div>
                     </div>
                 </div>
             </div>
@@ -68,6 +65,12 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script src="{{ url_for('static', filename='js/peer_file.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/peer_flood.js') }}"></script>
+    <div id="loadingOverlay" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-lg">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="mt-2 text-gray-600">Uploading...</p>
+        </div>
+    </div>
 </body>
 </html>

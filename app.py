@@ -76,6 +76,8 @@ else:
 #Message Handler Setup
 message_handler = MessageHandler()
 
+app.config['UPLOAD_FOLDER'] = Config.UPLOAD_FOLDER
+
 # Login Manager Setup
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
@@ -2171,52 +2173,37 @@ def handle_file_search(data):
             emit('search_results', {'success': True, 'results': []})
             return
             
+        # Use P2P flooding for search
         user_id = str(current_user.id)
-        node = chat_nodes.get(user_id)
-        if not node:
-            node = ChatNode(user_id, current_user.username)
-            chat_nodes[user_id] = node
+        if user_id in chat_nodes and hasattr(chat_nodes[user_id], 'p2p_network'):
+            # Initiate flood search
+            chat_nodes[user_id].p2p_network.flood_search(query)
             
-        # Initiate P2P search
-        node.p2p_network.flood_search(query)
-        
-        # Wait briefly for responses
-        time.sleep(2)
-        
-        # Collect results
-        results = []
-        
-        # Add local results
-        local_files = node.secure_bucket.search_files(query)
-        for file in local_files:
-            results.append({
-                'name': file['name'],
-                'size': file['size'],
-                'username': 'You (Local)',
-                'source': {'host': node.p2p_network.host, 'port': node.p2p_network.port}
+            # Wait briefly for responses to come in
+            time.sleep(2)  # Adjust timeout as needed
+            
+            # Get collected results from the P2P network
+            results = []
+            for filename, sources in chat_nodes[user_id].p2p_network.file_sources.items():
+                for host, port, file_id in sources:
+                    results.append({
+                        'name': filename,
+                        'username': f'Peer at {host}:{port}',
+                        'source': {
+                            'host': host,
+                            'port': port,
+                            'file_id': file_id
+                        }
+                    })
+            
+            emit('search_results', {
+                'success': True,
+                'results': results
             })
         
-        # Add P2P results
-        for filename, sources in node.p2p_network.file_sources.items():
-            for source in sources:
-                results.append({
-                    'name': filename,
-                    'size': 0,  # Size not available for P2P files
-                    'username': f"Peer ({source[0]}:{source[1]})",
-                    'source': {'host': source[0], 'port': source[1], 'file_id': source[2]}
-                })
-        
-        emit('search_results', {
-            'success': True,
-            'results': results
-        })
-        
     except Exception as e:
-        print(f"Error searching files: {e}")
-        emit('search_results', {
-            'success': False,
-            'error': str(e)
-        })
+        print(f"Error in P2P search: {e}")
+        emit('error', {'message': str(e)})
 
 @app.route('/api/delete_file/<file_id>', methods=['DELETE'])
 @login_required
@@ -2234,4 +2221,188 @@ def delete_file(file_id):
             
     except Exception as e:
         print(f"Error deleting file: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/peer_file/<user_id>/<file_id>/<filename>', endpoint='download_peer_file_alt')
+@login_required
+def download_peer_file_alternate(user_id, file_id, filename):
+    try:
+        # Get the peer's chat node
+        if user_id not in chat_nodes:
+            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+            
+        node = chat_nodes[user_id]
+        
+        # Get file content from peer's secure bucket
+        file_content = node.secure_bucket.get_file_content(file_id)
+        if not file_content:
+            return jsonify({'error': 'File not found'}), 404
+            
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(file_content)
+            temp_path = temp_file.name
+            
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                app.logger.error(f"Error cleaning up temp file: {e}")
+            return response
+            
+        return send_file(
+            temp_path,
+            as_attachment=True,
+            download_name=filename,
+            max_age=0
+        )
+        
+    except Exception as e:
+        app.logger.error(f"Error downloading file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+@socketio.on('download_file')
+@authenticated_only
+def handle_file_download(data):
+    try:
+        filename = data.get('filename')
+        source = data.get('source')
+        
+        if not filename or not source:
+            emit('error', {'message': 'Invalid download request'})
+            return
+            
+        # Request file from peer using P2P network
+        user_id = str(current_user.id)
+        if user_id in chat_nodes and hasattr(chat_nodes[user_id], 'p2p_network'):
+            chat_nodes[user_id].p2p_network.request_file(
+                filename,
+                (source['host'], source['port'], source['file_id'])
+            )
+            
+            # The P2P network will handle receiving the file and emitting the download_ready event
+            
+    except Exception as e:
+        print(f"Error handling file download: {e}")
+        emit('error', {'message': str(e)})
+
+@app.route('/download_temp/<filename>')
+@login_required
+def download_temp_file(filename):
+    try:
+        user_id = str(current_user.id)
+        if user_id not in chat_nodes:
+            return jsonify({'error': 'Node not found'}), 404
+            
+        temp_dir = chat_nodes[user_id].p2p_network.temp_directory
+        return send_from_directory(temp_dir, filename, as_attachment=True)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@socketio.on('flood_share_file')
+@authenticated_only
+def handle_flood_share(data):
+    try:
+        # Create a unique file ID
+        file_id = f"{current_user.id}_{time.time()}"
+        
+        # Store file info in memory
+        shared_files[file_id] = {
+            'name': data['name'],
+            'size': data['size'],
+            'data': data['data'],
+            'owner': current_user.id
+        }
+        
+        # Broadcast to connected peers - Fix the emit syntax
+        socketio.emit('flood_new_file', {
+            'fileId': file_id,
+            'name': data['name'],
+            'size': data['size'],
+            'peer': current_user.username
+        })  # Remove broadcast=True
+        
+        # Send confirmation to the uploader
+        emit('flood_file_shared', {
+            'success': True,
+            'fileId': file_id,
+            'name': data['name'],
+            'size': data['size']
+        })
+        
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
+shared_files = {}
+
+@socketio.on('flood_search')
+@authenticated_only
+def handle_flood_search(data):
+    try:
+        query = data['query'].lower()
+        results = []
+        
+        # Search through shared files
+        for file_id, file_info in shared_files.items():
+            if query in file_info['name'].lower():
+                results.append({
+                    'fileId': file_id,
+                    'name': file_info['name'],
+                    'size': file_info['size'],
+                    'peer': User.query.get(file_info['owner']).username
+                })
+        
+        emit('flood_search_results', {'results': results})
+        
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
+@app.route('/api/flood_upload', methods=['POST'])
+@login_required
+def handle_flood_upload():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file part'})
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No selected file'})
+            
+        if not allowed_file(file.filename):
+            return jsonify({'success': False, 'error': 'File type not allowed'})
+            
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file_id = f"{current_user.id}_{time.time()}_{filename}"
+            
+            # Read file content directly from request
+            file_content = file.read()
+                
+            # Store in shared_files dictionary
+            shared_files[file_id] = {
+                'name': filename,
+                'size': len(file_content),
+                'data': file_content,
+                'owner': current_user.id
+            }
+            
+            # Broadcast to peers
+            socketio.emit('flood_new_file', {
+                'fileId': file_id,
+                'name': filename,
+                'size': shared_files[file_id]['size'],
+                'peer': current_user.username
+            })
+            
+            return jsonify({
+                'success': True,
+                'fileId': file_id,
+                'name': filename,
+                'size': shared_files[file_id]['size']
+            })
+            
+    except Exception as e:
+        print(f"Upload error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})

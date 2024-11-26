@@ -10,6 +10,9 @@ class Config:
     SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://p2p_user:{DB_PASSWORD}@192.168.1.6:3306/p2p_social_network'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp_uploads')
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
     #Mail Server Configuration
     MAIL_SERVER = 'smtp.gmail.com'
     MAIL_PORT = 465
