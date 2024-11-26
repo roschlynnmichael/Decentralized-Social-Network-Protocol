@@ -1,5 +1,6 @@
 import sys
 import os
+from functools import wraps
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, send_file
@@ -139,6 +140,15 @@ def send_email(subject, body, sender, recipients, password):
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
         raise
+
+def authenticated_only(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            emit('error', {'message': 'Please log in to continue'})
+            return
+        return f(*args, **kwargs)
+    return wrapped
 
 # Function to generate verification code
 def generate_verification_code():
@@ -1493,6 +1503,7 @@ def handle_message(data):
         emit('error', {'message': str(e)})
 
 @socketio.on('check_bucket')
+@authenticated_only
 def handle_check_bucket():
     try:
         user_id = str(current_user.id)
@@ -1801,3 +1812,78 @@ def download_shared_file(file_id, filename):
     except Exception as e:
         app.logger.error(f"Error downloading file: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    
+@socketio.on('get_user_info')
+@authenticated_only
+def handle_get_user_info():
+    emit('user_info', {
+        'user_id': current_user.id,  # Assuming you're using Flask-Login
+        'username': current_user.username
+    })
+
+@socketio.on('store_message')
+@authenticated_only
+def handle_store_message(data):
+    try:
+        content = data['message']['content']
+        user_id = str(current_user.id)
+        
+        # Get or create chat node
+        if user_id not in chat_nodes:
+            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+        
+        # Create and store message
+        result = chat_nodes[user_id].broadcast_message(content)
+        
+        # Update bucket hash
+        bucket_manager.update_bucket_hash(user_id, result['bucket_hash'])
+        
+        # Send decrypted message to clients
+        message = result['message']
+        message['content'] = content  # Use original content for display
+        
+        # Broadcast to all clients (including sender)
+        emit('chat_message', {
+            'message': message
+        }, broadcast=True)
+        
+        return {'success': True, 'bucket_hash': result['bucket_hash']}
+    except Exception as e:
+        print(f"Error storing message: {e}")
+        return {'success': False, 'error': str(e)}
+
+@socketio.on('clear_chat_history')
+@authenticated_only
+def handle_clear_chat():
+    try:
+        user_id = str(current_user.id)
+        
+        # Get user's chat node
+        node = chat_nodes.get(user_id)
+        if not node:
+            node = ChatNode(user_id, current_user.username)
+            chat_nodes[user_id] = node
+            
+        # Check if there's any history to clear
+        current_history = node.get_chat_history()
+        if not current_history:
+            emit('chat_history_cleared', {
+                'success': True,
+                'message': 'Chat history is already empty'
+            })
+            return
+            
+        # Clear chat history in bucket
+        result = node.clear_chat_history()
+        
+        # Update bucket hash
+        bucket_manager.update_bucket_hash(user_id, result['bucket_hash'])
+        
+        emit('chat_history_cleared', {
+            'success': True,
+            'bucket_hash': result['bucket_hash']
+        }, broadcast=True)  # Broadcast to all users so everyone's chat clears
+        
+    except Exception as e:
+        print(f"Error clearing chat history: {e}")
+        emit('error', {'message': str(e)})

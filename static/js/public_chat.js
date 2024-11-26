@@ -1,6 +1,9 @@
 document.addEventListener('DOMContentLoaded', function() {
     const socket = io();
     let currentBucketHash = null;
+    let p2pChat = null;
+    let currentUserId = null;
+    let currentUsername = null;
 
     // DOM Elements
     const noBucketWarning = document.getElementById('noBucketWarning');
@@ -10,6 +13,164 @@ document.addEventListener('DOMContentLoaded', function() {
     const myFilesList = document.getElementById('myFilesList');
     const dropZone = document.querySelector('.border-dashed');
     const createBucketBtn = document.getElementById('createBucket');
+    const messageInput = document.getElementById('messageInput');
+    const sendMessageBtn = document.getElementById('sendMessageBtn');
+    const chatMessages = document.getElementById('chatMessages');
+
+    // P2P Chat Class
+    class P2PChat {
+        constructor(socket) {
+            this.socket = socket;
+            this.peers = new Map();
+            this.messageInput = messageInput;
+            this.sendMessageBtn = sendMessageBtn;
+            this.chatMessages = chatMessages;
+            
+            this.initializeSocketHandlers();
+            this.initializeUIHandlers();
+
+            // Add a Set to track processed messages
+            this.processedMessages = new Set();
+
+            // Add handler for chat history cleared event
+            this.socket.on('chat_history_cleared', (data) => {
+                if (data.success) {
+                    this.chatMessages.innerHTML = '';
+                    this.processedMessages.clear();
+                }
+            });
+        }
+
+        initializeSocketHandlers() {
+            this.socket.on('new_peer', async ({ peer_id, initiator }) => {
+                await this.connectToPeer(peer_id, initiator);
+            });
+
+            this.socket.on('signal', async ({ peer_id, signal }) => {
+                const peer = this.peers.get(peer_id);
+                if (peer) {
+                    await peer.signal(signal);
+                }
+            });
+
+            this.socket.on('chat_history', (data) => {
+                this.displayChatHistory(data.messages);
+            });
+
+            this.socket.on('peer_disconnected', ({ peer_id }) => {
+                if (this.peers.has(peer_id)) {
+                    this.peers.get(peer_id).destroy();
+                    this.peers.delete(peer_id);
+                }
+            });
+        }
+
+        initializeUIHandlers() {
+            this.sendMessageBtn.addEventListener('click', () => this.sendMessage());
+            this.messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendMessage();
+                }
+            });
+        }
+
+        async sendMessage() {
+            const content = this.messageInput.value.trim();
+            if (!content) return;
+
+            // Remove the local display since we'll get it back from the server
+            this.socket.emit('store_message', { 
+                message: {
+                    content: content
+                }
+            });
+
+            // Clear input
+            this.messageInput.value = '';
+        }
+
+        displayMessage(message, animate = false) {
+            // Check if message has already been processed
+            if (this.processedMessages.has(message.id)) {
+                return;
+            }
+            this.processedMessages.add(message.id);
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${message.sender_id === currentUserId ? 'justify-end' : 'justify-start'} ${animate ? 'message-animate-in' : ''}`;
+
+            messageDiv.innerHTML = `
+                <div class="max-w-[70%] ${message.sender_id === currentUserId ? 'bg-blue-500 text-white' : 'bg-gray-100'} 
+                    rounded-lg px-4 py-2 transition-all duration-300">
+                    <div class="text-xs ${message.sender_id === currentUserId ? 'text-blue-100' : 'text-gray-500'} mb-1">
+                        ${message.username}
+                    </div>
+                    <div class="break-words">
+                        ${this.escapeHtml(message.content)}
+                    </div>
+                    <div class="text-xs ${message.sender_id === currentUserId ? 'text-blue-100' : 'text-gray-500'} mt-1">
+                        ${new Date(message.timestamp * 1000).toLocaleTimeString()}
+                    </div>
+                </div>
+            `;
+
+            this.chatMessages.appendChild(messageDiv);
+            this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+        }
+
+        displayChatHistory(messages) {
+            this.chatMessages.innerHTML = '';
+            messages.forEach(message => this.displayMessage(message));
+        }
+
+        async connectToPeer(peerId, initiator) {
+            if (this.peers.has(peerId)) return;
+
+            const peer = new SimplePeer({
+                initiator,
+                trickle: false
+            });
+
+            peer.on('signal', data => {
+                this.socket.emit('signal', { peer_id: peerId, signal: data });
+            });
+
+            peer.on('data', data => {
+                try {
+                    const message = JSON.parse(data);
+                    this.displayMessage(message, true);
+                } catch (e) {
+                    console.error('Error processing peer message:', e);
+                }
+            });
+
+            this.peers.set(peerId, peer);
+        }
+
+        // Add method to clear chat history
+        clearChatHistory() {
+            // Check if there are any messages to clear
+            if (this.chatMessages.children.length === 0) {
+                console.log('Chat history is already empty');
+                return;
+            }
+
+            if (confirm('Are you sure you want to clear your chat history?')) {
+                this.socket.emit('clear_chat_history');
+            }
+        }
+
+        // Add this helper method to escape HTML and prevent XSS
+        escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    }
 
     // Show/Hide UI sections
     function showMainArea(bucketHash) {
@@ -17,6 +178,11 @@ document.addEventListener('DOMContentLoaded', function() {
         mainArea.style.display = 'grid';
         bucketHashElement.textContent = bucketHash;
         currentBucketHash = bucketHash;
+        
+        // Initialize P2P chat if we have user info
+        if (!p2pChat && currentUserId && currentUsername) {
+            p2pChat = new P2PChat(socket);
+        }
     }
 
     function showBucketWarning() {
@@ -26,16 +192,10 @@ document.addEventListener('DOMContentLoaded', function() {
         currentBucketHash = null;
     }
 
-    // Bucket Creation
-    createBucketBtn?.addEventListener('click', () => {
-        createBucketBtn.disabled = true;
-        createBucketBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Creating...';
-        socket.emit('create_bucket');
-    });
-
     // Socket event handlers
     socket.on('connect', () => {
-        console.log('Socket connected, checking bucket status');
+        console.log('Connected to server');
+        socket.emit('get_user_info');
         socket.emit('check_bucket');
     });
 
@@ -47,6 +207,34 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             showBucketWarning();
         }
+    });
+
+    socket.on('user_info', (data) => {
+        currentUserId = data.user_id;
+        currentUsername = data.username;
+        console.log('User info received:', data);
+        
+        // Initialize chat if bucket is already ready
+        if (currentBucketHash && !p2pChat) {
+            p2pChat = new P2PChat(socket);
+            
+            // Add clear chat button handler
+            const clearChatBtn = document.getElementById('clearChatBtn');
+            clearChatBtn.addEventListener('click', () => p2pChat.clearChatHistory());
+        }
+    });
+
+    socket.on('chat_message', (data) => {
+        if (p2pChat) {
+            p2pChat.displayMessage(data.message, true);
+        }
+    });
+
+    // Bucket Creation
+    createBucketBtn?.addEventListener('click', () => {
+        createBucketBtn.disabled = true;
+        createBucketBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Creating...';
+        socket.emit('create_bucket');
     });
 
     // File Upload Handling
@@ -229,76 +417,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    // Initialize chat functionality
-    function initChat() {
-        const messageInput = document.getElementById('messageInput');
-        const sendMessageBtn = document.getElementById('sendMessageBtn');
-        const chatMessages = document.getElementById('chatMessages');
-
-        // Handle send message
-        sendMessageBtn.addEventListener('click', () => {
-            sendMessage();
-        });
-
-        // Handle enter key
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-
-        // Listen for new messages
-        socket.on('new_message', (data) => {
-            appendMessage(data.message);
-        });
-
-        // Listen for chat history
-        socket.on('chat_history', (data) => {
-            chatMessages.innerHTML = ''; // Clear existing messages
-            data.messages.forEach(message => {
-                appendMessage(message);
-            });
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        });
-    }
-
-    // Send a message
-    function sendMessage() {
-        const messageInput = document.getElementById('messageInput');
-        const content = messageInput.value.trim();
-        
-        if (content) {
-            socket.emit('send_message', { message: content });
-            messageInput.value = ''; // Clear input
+    socket.on('error', (data) => {
+        console.error('Socket error:', data.message);
+        if (data.message === 'Please log in to continue') {
+            // Redirect to login page
+            window.location.href = '/login';
         }
-    }
-
-    // Append a message to the chat
-    function appendMessage(message) {
-        const chatMessages = document.getElementById('chatMessages');
-        const messageDiv = document.createElement('div');
-        const isOwnMessage = message.sender_id === currentUserId;
-        
-        messageDiv.className = `flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`;
-        
-        messageDiv.innerHTML = `
-            <div class="max-w-[70%] ${isOwnMessage ? 'bg-blue-500 text-white' : 'bg-gray-100'} rounded-lg px-4 py-2">
-                <div class="text-xs ${isOwnMessage ? 'text-blue-100' : 'text-gray-500'} mb-1">
-                    ${message.username}
-                </div>
-                <div class="break-words">
-                    ${message.content}
-                </div>
-                <div class="text-xs ${isOwnMessage ? 'text-blue-100' : 'text-gray-500'} mt-1">
-                    ${new Date(message.timestamp * 1000).toLocaleTimeString()}
-                </div>
-            </div>
-        `;
-        
-        chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    // Add this to your existing initialization code
-    initChat();
+    });
 });

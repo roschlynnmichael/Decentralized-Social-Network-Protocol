@@ -48,3 +48,15 @@ class ChatNode:
     def get_bucket_hash(self) -> str:
         """Get current bucket hash"""
         return self.secure_bucket._save_bucket()
+
+    def clear_chat_history(self) -> Dict:
+        """Clear chat history from bucket"""
+        # Clear chat history
+        self.secure_bucket.clear_chat_history()
+        
+        # Get new bucket hash
+        bucket_hash = self.secure_bucket._save_bucket()
+        
+        return {
+            'bucket_hash': bucket_hash
+        }

@@ -111,8 +111,20 @@ class SecureBucket:
     def add_chat_message(self, message: Dict) -> str:
         """Add chat message to bucket"""
         try:
+            # Create a copy of the message for storage
+            storage_message = message.copy()
+            
+            # Encrypt only the content
+            storage_message['content'] = self.cipher_suite.encrypt(
+                message['content'].encode()
+            ).decode()
+            
             # Add message to chat history
-            self.bucket_structure['chat_history'].append(message)
+            self.bucket_structure['chat_history'].append(storage_message)
+            
+            # Keep only last 100 messages
+            if len(self.bucket_structure['chat_history']) > 100:
+                self.bucket_structure['chat_history'] = self.bucket_structure['chat_history'][-100:]
             
             # Save updated bucket and return new hash
             return self._save_bucket()
@@ -122,7 +134,37 @@ class SecureBucket:
 
     def get_chat_history(self) -> List[Dict]:
         """Get decrypted chat history"""
-        return self.bucket_structure['chat_history']
+        try:
+            decrypted_history = []
+            for message in self.bucket_structure['chat_history']:
+                # Create a copy of the message
+                decrypted_message = message.copy()
+                # Decrypt only the content
+                decrypted_message['content'] = self.cipher_suite.decrypt(
+                    message['content'].encode()
+                ).decode()
+                decrypted_history.append(decrypted_message)
+            return decrypted_history
+        except Exception as e:
+            print(f"Error getting chat history: {e}")
+            return []
+
+    def get_chat_history(self) -> List[Dict]:
+        """Get decrypted chat history"""
+        try:
+            decrypted_history = []
+            for message in self.bucket_structure['chat_history']:
+                # Create a copy of the message
+                decrypted_message = message.copy()
+                # Decrypt only the content
+                decrypted_message['content'] = self.cipher_suite.decrypt(
+                    message['content'].encode()
+                ).decode()
+                decrypted_history.append(decrypted_message)
+            return decrypted_history
+        except Exception as e:
+            print(f"Error getting chat history: {e}")
+            return []
 
     def sync_chat_history(self, peer_bucket_hash: str):
         """Sync chat history with another peer's bucket"""
@@ -235,3 +277,12 @@ class SecureBucket:
         except Exception as e:
             print(f"Error deleting file: {e}")
             return False
+
+    def clear_chat_history(self):
+        """Clear all chat history from bucket"""
+        # Check if there are any messages to clear
+        if not self.bucket_structure['chat_history']:
+            return self._save_bucket()  # Return current hash if no messages to clear
+        
+        self.bucket_structure['chat_history'] = []
+        return self._save_bucket()
