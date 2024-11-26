@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Socket event listeners
     socket.on('connect', () => console.log('Socket connected'));
-    socket.on('message', displayMessage);
+    socket.on('community_message', displayMessage);
     socket.on('message_history', handleMessageHistory);
     socket.on('community_stats_update', updateCommunityStats);
     socket.on('clear_chat', handleClearChat);
@@ -350,16 +350,14 @@ function handleMessageSubmit(e) {
     const message = messageInput.value.trim();
     
     if (message && currentCommunityId) {
-        socket.emit('message', {
+        socket.emit('community_message', {
             room: `community_${currentCommunityId}`,
-            message: message,
             content: message
         });
         
         messageInput.value = '';
     }
 }
-
 function handleMessageHistory(data) {
     if (!messageArea) return;
     

@@ -109,25 +109,26 @@ class CommunityFileSharing {
     }
 
     setupMessageListener() {
-        this.socket.on('message', (message) => {
+        this.socket.on('community_message', (message) => {
             if (message.fileInfo) {
-                const messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
-                if (messageElement) {
-                    const fileLink = messageElement.querySelector('.file-link');
-                    if (fileLink) {
-                        fileLink.addEventListener('click', (e) => {
-                            e.preventDefault();
-                            const fileHash = message.fileInfo.hash;
-                            const fileName = message.fileInfo.name;
-                            console.log('File info:', { fileHash, fileName, communityId: currentCommunityId });
-                            if (!fileHash) {
-                                console.error('File hash is missing:', message.fileInfo);
-                                return;
-                            }
-                            this.handleFileDownload(fileHash, fileName, currentCommunityId);
-                        });
+                setTimeout(() => {
+                    const messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
+                    if (messageElement) {
+                        const fileLink = messageElement.querySelector('.file-link');
+                        if (fileLink) {
+                            fileLink.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                const fileHash = message.fileInfo.hash;
+                                const fileName = message.fileInfo.name;
+                                if (!fileHash) {
+                                    console.error('File hash is missing:', message.fileInfo);
+                                    return;
+                                }
+                                this.handleFileDownload(fileHash, fileName, currentCommunityId);
+                            });
+                        }
                     }
-                }
+                }, 100);
             }
         });
     }

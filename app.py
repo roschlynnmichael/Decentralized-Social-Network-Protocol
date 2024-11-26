@@ -1330,42 +1330,67 @@ def download_community_file(file_hash, filename):
 def share_community_file():
     try:
         if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+            
         file = request.files['file']
         community_id = request.form.get('community_id')
-
-        if not community_id:
-            return jsonify({'error': 'Community ID required'}), 400
-
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'File type not allowed'}), 400
-
-        # Generate unique task ID
-        task_id = f"community_upload_{int(time.time())}_{current_user.id}"
         
-        # Start upload process
-        upload_executor.submit(
-            handle_community_file_upload,
-            file.read(),
-            secure_filename(file.filename),
-            current_user.id,
-            community_id,
-            task_id
+        if not file or not community_id:
+            return jsonify({'success': False, 'error': 'Invalid request'}), 400
+            
+        # Calculate file hash and info
+        file_content = file.read()
+        file_hash = hashlib.sha256(file_content).hexdigest()
+        file_size = len(file_content)
+        file_type = mimetypes.guess_type(file.filename)[0] or 'application/octet-stream'
+        
+        # Reset file pointer
+        file.seek(0)
+        
+        # Store file in memory/cache
+        CommunityFileHandler.shared_files[file_hash] = {
+            'data': file_content,
+            'name': file.filename,
+            'type': file_type,
+            'size': file_size
+        }
+        
+        # Create message in database
+        message = Message(
+            community_id=community_id,
+            sender_id=current_user.id,
+            username=current_user.username,
+            content=f"Shared file: {file.filename}",
+            timestamp=datetime.utcnow()
         )
-
+        db.session.add(message)
+        db.session.commit()
+        
+        # Emit using community_message event
+        message_data = {
+            'id': message.id,
+            'sender_id': current_user.id,
+            'username': current_user.username,
+            'content': f"Shared file: {file.filename}",
+            'timestamp': message.timestamp.isoformat(),
+            'fileInfo': {
+                'hash': file_hash,
+                'name': file.filename,
+                'size': file_size,
+                'type': file_type
+            }
+        }
+        
+        socketio.emit('community_message', message_data, room=f'community_{community_id}')
+        
         return jsonify({
             'success': True,
-            'task_id': task_id,
-            'message': 'Upload started'
+            'message': message_data
         })
-
+        
     except Exception as e:
-        app.logger.error(f"Error sharing community file: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f"File sharing error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/communities', methods=['POST'])
 @login_required
@@ -2473,3 +2498,43 @@ def handle_flood_download(file_id):
     except Exception as e:
         app.logger.error(f"Download error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@socketio.on('community_message')
+@authenticated_only
+def handle_community_message(data):
+    try:
+        content = data.get('content') or data.get('message')
+        room = data.get('room')
+        
+        if not room or not room.startswith('community_'):
+            return
+        
+        community_id = int(room.split('_')[1])
+        
+        # Create message object with current timestamp
+        current_time = datetime.utcnow()
+        message = Message(
+            community_id=community_id,
+            sender_id=current_user.id,
+            username=current_user.username,
+            content=content,
+            timestamp=current_time  # Add timestamp field if it exists in your model
+        )
+        
+        db.session.add(message)
+        db.session.commit()
+        
+        # Emit to room using the timestamp
+        message_data = {
+            'id': message.id,
+            'sender_id': current_user.id,
+            'username': current_user.username,
+            'content': content,
+            'timestamp': current_time.isoformat()  # Format the timestamp
+        }
+        
+        emit('community_message', message_data, room=room)
+        
+    except Exception as e:
+        app.logger.error(f"Error handling community message: {str(e)}")
+        emit('error', {'message': str(e)})
