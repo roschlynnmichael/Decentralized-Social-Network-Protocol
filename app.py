@@ -12,6 +12,8 @@ from python_scripts.handlers.message_handler import MessageHandler
 from python_scripts.handlers.ipfs_handler import IPFSHandler
 from python_scripts.dht.group_dht import GroupDHT
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from python_scripts.public_chat.bucket_manager import BucketManager
+from python_scripts.public_chat.chat_node import ChatNode
 import smtplib
 import random
 import mimetypes
@@ -42,6 +44,8 @@ upload_executor = ThreadPoolExecutor(max_workers=5)
 upload_status = {}
 active_group_dhts = {}
 active_users = {}
+chat_nodes = {}
+bucket_manager = BucketManager()
 
 load_dotenv()
 
@@ -851,36 +855,33 @@ def handle_file_upload(file_content, filename, user_id, task_id):
 def share_file():
     try:
         if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-
+            return jsonify({'success': False, 'error': 'No file provided'})
+            
         file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'File type not allowed'}), 400
-
-        # Generate a unique task ID for this upload
-        task_id = f"upload_{int(time.time())}_{current_user.id}"
+        if not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'})
+            
+        # Get user's chat node
+        user_id = str(current_user.id)
+        if user_id not in chat_nodes:
+            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+            
+        # Add file to secure bucket
+        file_content = file.read()
+        file_info = chat_nodes[user_id].secure_bucket.add_file(file_content, file.filename)
         
-        # Start the upload process in a separate thread
-        upload_executor.submit(
-            handle_file_upload,
-            file.read(),
-            secure_filename(file.filename),
-            current_user.id,
-            task_id
-        )
-
+        # Update bucket hash in manager
+        bucket_hash = chat_nodes[user_id].secure_bucket._save_bucket()
+        bucket_manager.update_bucket_hash(user_id, bucket_hash)
+        
         return jsonify({
             'success': True,
-            'task_id': task_id,
-            'message': 'Upload started'
+            'file_info': file_info
         })
-
+        
     except Exception as e:
-        app.logger.error(f"Error initiating file share: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f"Error sharing file: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/upload_status/<task_id>')
 @login_required
@@ -1416,6 +1417,161 @@ def clear_community_chat(community_id):
         app.logger.error(f"Error clearing chat: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/public_chat', methods=['GET'])
+@login_required
+def public_chat():
+    return render_template('public_chat.html')
+
+@socketio.on('join_chat')
+def handle_join_chat():
+    try:
+        user_id = str(current_user.id)
+        
+        # Check if user has a bucket
+        if not bucket_manager.user_has_bucket(user_id):
+            emit('error', {'message': 'Please create a bucket first'})
+            return
+            
+        # Create chat node if doesn't exist
+        if user_id not in chat_nodes:
+            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+            
+            # Get existing bucket hash and sync
+            existing_hash = bucket_manager.get_bucket_hash(user_id)
+            if existing_hash:
+                chat_nodes[user_id].sync_with_peer(existing_hash)
+        
+        # Join chat room
+        join_room('p2p_chat')
+        
+        # Get current bucket hash
+        current_hash = chat_nodes[user_id].get_bucket_hash()
+        
+        # Broadcast join message
+        emit('user_joined', {
+            'user_id': user_id,
+            'username': current_user.username,
+            'bucket_hash': current_hash
+        }, room='p2p_chat')
+        
+        # Send chat history to user
+        emit('chat_history', {
+            'messages': chat_nodes[user_id].get_chat_history()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in join_chat: {str(e)}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('send_message')
+def handle_message(data):
+    try:
+        content = data.get('message', '').strip()
+        if not content:
+            return
+            
+        user_id = str(current_user.id)
+        
+        # Get user's chat node
+        node = chat_nodes.get(user_id)
+        if not node:
+            return
+            
+        # Broadcast message
+        result = node.broadcast_message(content)
+        
+        # Update bucket hash in manager
+        bucket_manager.update_bucket_hash(user_id, result['bucket_hash'])
+        
+        # Send to all peers
+        emit('new_message', {
+            'message': result['message'],
+            'bucket_hash': result['bucket_hash']
+        }, room='p2p_chat')
+        
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
+@socketio.on('check_bucket')
+def handle_check_bucket():
+    try:
+        user_id = str(current_user.id)
+        print(f"Checking bucket for user {user_id}")
+        
+        # Get bucket hash from bucket manager
+        bucket_hash = bucket_manager.get_bucket_hash(user_id)
+        has_bucket = bucket_hash is not None
+        
+        print(f"Bucket status - has_bucket: {has_bucket}, hash: {bucket_hash}")
+        
+        # Create chat node if bucket exists but node doesn't
+        if has_bucket and user_id not in chat_nodes:
+            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+            chat_nodes[user_id].sync_with_peer(bucket_hash)
+        
+        emit('bucket_status', {
+            'has_bucket': has_bucket,
+            'bucket_hash': bucket_hash
+        })
+    except Exception as e:
+        print(f"Error checking bucket: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('create_bucket')
+def handle_create_bucket():
+    try:
+        user_id = str(current_user.id)
+        print(f"Creating bucket for user {user_id}")
+        
+        # Create new chat node if it doesn't exist
+        if user_id not in chat_nodes:
+            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+        
+        # Get bucket hash
+        bucket_hash = chat_nodes[user_id].get_bucket_hash()
+        
+        # Update bucket manager
+        bucket_manager.update_bucket_hash(user_id, bucket_hash)
+        
+        print(f"Bucket created with hash: {bucket_hash}")
+        
+        emit('bucket_status', {
+            'has_bucket': True,
+            'bucket_hash': bucket_hash
+        })
+    except Exception as e:
+        print(f"Error creating bucket: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('sync_request')
+def handle_sync_request(data):
+    try:
+        peer_bucket_hash = data.get('bucket_hash')
+        if not peer_bucket_hash:
+            return
+            
+        user_id = str(current_user.id)
+        
+        # Get user's chat node
+        node = chat_nodes.get(user_id)
+        if not node:
+            return
+            
+        # Sync with peer's bucket
+        new_hash = node.sync_with_peer(peer_bucket_hash)
+        
+        # Update bucket hash in manager
+        bucket_manager.update_bucket_hash(user_id, new_hash)
+        
+        # Broadcast new bucket hash
+        emit('bucket_updated', {
+            'user_id': user_id,
+            'bucket_hash': new_hash
+        }, room='p2p_chat')
+        
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
 @socketio.on('typing')
 def handle_typing(data):
     room = data.get('room')
@@ -1559,3 +1715,89 @@ def handle_join_community(data):
             
     except Exception as e:
         emit('error', {'message': str(e)})
+
+@socketio.on('get_my_files')
+def handle_get_my_files():
+    try:
+        user_id = str(current_user.id)
+        print(f"Getting files for user {user_id}")
+        
+        # Create chat node if it doesn't exist
+        if user_id not in chat_nodes:
+            bucket_hash = bucket_manager.get_bucket_hash(user_id)
+            if bucket_hash:
+                chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+                chat_nodes[user_id].secure_bucket.sync_with_peer(bucket_hash)
+        
+        node = chat_nodes.get(user_id)
+        if not node:
+            emit('error', {'message': 'Chat node not found'})
+            return
+
+        files = node.secure_bucket.get_files()
+        print(f"Found {len(files)} files")
+        emit('my_files_list', {'files': files})
+
+    except Exception as e:
+        print(f"Error getting files: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('delete_file')
+def handle_delete_file(data):
+    try:
+        user_id = str(current_user.id)
+        file_id = data.get('fileId')
+        
+        node = chat_nodes.get(user_id)
+        if not node:
+            emit('error', {'message': 'Chat node not found'})
+            return
+
+        success = node.secure_bucket.delete_file(file_id)
+        if success:
+            # Refresh file list
+            files = node.secure_bucket.get_files()
+            emit('my_files_list', {'files': files})
+        else:
+            emit('error', {'message': 'Failed to delete file'})
+
+    except Exception as e:
+        emit('error', {'message': str(e)})
+
+@app.route('/api/share_file/<file_id>/<filename>')
+@login_required
+def download_shared_file(file_id, filename):
+    try:
+        # Get user's chat node
+        user_id = str(current_user.id)
+        if user_id not in chat_nodes:
+            chat_nodes[user_id] = ChatNode(user_id, current_user.username)
+            
+        # Get file content from secure bucket
+        file_content = chat_nodes[user_id].secure_bucket.get_file_content(file_id)
+        if not file_content:
+            return jsonify({'error': 'File not found'}), 404
+            
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(file_content)
+            temp_path = temp_file.name
+            
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                app.logger.error(f"Error cleaning up temp file: {e}")
+            return response
+            
+        return send_file(
+            temp_path,
+            as_attachment=True,
+            download_name=filename,
+            max_age=0
+        )
+        
+    except Exception as e:
+        app.logger.error(f"Error downloading file: {str(e)}")
+        return jsonify({'error': str(e)}), 500

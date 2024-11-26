@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P File Sharing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen">
+        <!-- Header -->
+        <nav class="bg-white shadow-lg">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-16">
+                    <div class="flex items-center">
+                        <h1 class="text-xl font-bold text-gray-800">P2P File Sharing</h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="text-sm text-gray-600">
+                            Bucket Hash: <span id="bucketHash" class="font-mono">Connecting...</span>
+                        </div>
+                        <a href="{{ url_for('dashboard') }}" 
+                           class="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200">
+                            <i class="fas fa-arrow-left mr-2"></i>
+                            Back
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Bucket Warning -->
+        <div id="noBucketWarning" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-exclamation-triangle text-yellow-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-yellow-700">
+                            You need to create a bucket before you can start sharing files.
+                        </p>
+                        <div class="mt-4">
+                            <button id="createBucket" 
+                                    class="inline-flex items-center px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors duration-200">
+                                <i class="fas fa-folder-plus mr-2"></i>
+                                Create My Bucket
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div id="mainArea" class="grid grid-cols-3 gap-6" style="display: none;">
+                <!-- Left Column: My Bucket -->
+                <div class="col-span-1 space-y-6">
+                    <!-- My Bucket Section -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="p-4 bg-gray-50 border-b">
+                            <h2 class="text-lg font-semibold text-gray-700">My Bucket</h2>
+                        </div>
+                        
+                        <!-- File Upload -->
+                        <div class="p-4 border-b">
+                            <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
+                                <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                                    <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                                    <p class="text-sm text-gray-500">Upload to Bucket</p>
+                                    <p class="text-xs text-gray-500">(Max: 10MB)</p>
+                                </div>
+                                <input id="fileInput" type="file" class="hidden" />
+                            </label>
+                        </div>
+
+                        <!-- My Files List -->
+                        <div class="p-4">
+                            <h3 class="text-sm font-medium text-gray-700 mb-3">My Files</h3>
+                            <div id="myFilesList" class="space-y-2">
+                                <!-- Files will be listed here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Middle Column: Requests -->
+                <div class="col-span-1 space-y-6">
+                    <!-- Incoming Requests -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="p-4 bg-gray-50 border-b">
+                            <h2 class="text-lg font-semibold text-gray-700">Download Requests</h2>
+                        </div>
+                        <div class="p-4">
+                            <div id="incomingRequestsList" class="space-y-2">
+                                <!-- Requests will be listed here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- My Requests -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="p-4 bg-gray-50 border-b">
+                            <h2 class="text-lg font-semibold text-gray-700">My Requests</h2>
+                        </div>
+                        <div class="p-4">
+                            <div id="myRequestsList" class="space-y-2">
+                                <!-- My requests will be listed here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Broadcast & Search -->
+                <div class="col-span-1 space-y-6">
+                    <!-- Broadcast Section -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="p-4 bg-gray-50 border-b">
+                            <h2 class="text-lg font-semibold text-gray-700">Broadcast File</h2>
+                        </div>
+                        <div class="p-4">
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Select File to Broadcast</label>
+                                    <select id="broadcastFileSelect" class="w-full rounded-lg border-gray-300">
+                                        <option value="">Select a file...</option>
+                                    </select>
+                                </div>
+                                <button id="broadcastBtn" class="w-full inline-flex justify-center items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                                    <i class="fas fa-broadcast-tower mr-2"></i>
+                                    Broadcast
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Search Section -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="p-4 bg-gray-50 border-b">
+                            <h2 class="text-lg font-semibold text-gray-700">Search Files</h2>
+                        </div>
+                        <div class="p-4">
+                            <div class="space-y-4">
+                                <div class="flex space-x-2">
+                                    <input type="text" 
+                                           id="searchInput" 
+                                           class="flex-1 rounded-lg border-gray-300"
+                                           placeholder="Search for files...">
+                                    <button id="searchBtn" class="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                                <div id="searchResults" class="space-y-2">
+                                    <!-- Search results will appear here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/public_chat.js') }}"></script>
+</body>
+</html>
