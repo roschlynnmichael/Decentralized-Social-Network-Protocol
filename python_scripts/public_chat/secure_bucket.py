@@ -304,6 +304,28 @@ class SecureBucket:
             print(f"Error getting chat history: {e}")
             return []
 
+    def search_files(self, query: str) -> list:
+        """Search for files in bucket matching the query"""
+        try:
+            if 'files' not in self.bucket_structure:
+                return []
+                
+            query = query.lower()
+            matching_files = []
+            
+            for file_info in self.bucket_structure['files'].values():
+                if query in file_info['name'].lower():
+                    # Add download URL to file info
+                    file_data = file_info.copy()
+                    file_data['downloadUrl'] = f"/api/share_file/{file_data['id']}/{file_data['name']}"
+                    matching_files.append(file_data)
+            
+            return sorted(matching_files, key=lambda x: x['timestamp'], reverse=True)
+            
+        except Exception as e:
+            print(f"Error searching files: {e}")
+            return []
+
     def get_chat_history(self) -> List[Dict]:
         """Get decrypted chat history"""
         try:

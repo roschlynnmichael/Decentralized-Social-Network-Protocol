@@ -1899,61 +1899,6 @@ def handle_get_requests():
             
         requests = node.secure_bucket.get_requests()
         
-        # Send both types of requests
-        emit('my_requests', {'requests': requests['sent']})
-        emit('received_requests', {'requests': requests['received']})
-            
-    except Exception as e:
-        print(f"Error getting requests: {e}")
-        emit('error', {'message': str(e)})
-
-@socketio.on('broadcast_file_request')
-@authenticated_only
-def handle_file_request(data):
-    try:
-        user_id = str(current_user.id)
-        node = chat_nodes.get(user_id)
-        if not node:
-            return
-            
-        # Add user info to request
-        request_data = {
-            'filename': data.get('filename'),
-            'timestamp': time.time(),
-            'status': 'pending',
-            'outgoing': True,
-            'requester_id': user_id,
-            'username': current_user.username
-        }
-        
-        # Add request to bucket
-        node.secure_bucket.add_file_request(request_data)
-        
-        # Get updated requests
-        requests = node.secure_bucket.get_requests()
-        
-        # Send updated lists to all users
-        emit('my_requests', {'requests': requests['sent']}, room=user_id)
-        emit('received_requests', {'requests': requests['received']}, broadcast=True)
-            
-    except Exception as e:
-        print(f"Error handling file request: {e}")
-        emit('error', {'message': str(e)})
-
-# Add this near your other global variables at the top
-stored_requests = {}  # Dictionary to store requests by user_id
-
-@socketio.on('get_requests')
-@authenticated_only
-def handle_get_requests():
-    try:
-        user_id = str(current_user.id)
-        node = chat_nodes.get(user_id)
-        if not node:
-            return
-            
-        requests = node.secure_bucket.get_requests()
-        
         # Add requestor flag to sent requests
         sent_requests = [{**req, 'requestor': True} for req in requests['sent']]
         # Add requestor flag to received requests
@@ -2123,3 +2068,170 @@ def download_peer_file(user_id, file_id, filename):
     except Exception as e:
         app.logger.error(f"Error downloading peer file: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@socketio.on('p2p_search')
+@authenticated_only
+def handle_p2p_search(data):
+    try:
+        filename = data.get('filename')
+        if not filename:
+            return
+            
+        # Search in both P2P network and IPFS
+        p2p_results = []
+        ipfs_results = []
+        
+        # P2P flood search
+        if hasattr(chat_nodes[str(current_user.id)], 'p2p_network'):
+            chat_nodes[str(current_user.id)].p2p_network.flood_search(filename)
+            
+        # Combine results
+        all_results = p2p_results + ipfs_results
+        emit('p2p_search_results', {'results': all_results})
+        
+    except Exception as e:
+        print(f"Error in P2P search: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('p2p_request_file')
+@authenticated_only
+def handle_p2p_file_request(data):
+    try:
+        filename = data.get('filename')
+        source = data.get('source')
+        
+        # Request file from peer
+        if hasattr(chat_nodes[str(current_user.id)], 'p2p_network'):
+            chat_nodes[str(current_user.id)].p2p_network.request_file(
+                filename, 
+                source
+            )
+            
+    except Exception as e:
+        print(f"Error requesting P2P file: {e}")
+        emit('error', {'message': str(e)})
+
+@app.route('/api/my_shared_files')
+@login_required
+def get_my_shared_files():
+    try:
+        node = chat_nodes.get(str(current_user.id))
+        if not node:
+            return jsonify({'success': False, 'error': 'Node not found'})
+            
+        files = node.secure_bucket.get_files()
+        return jsonify({
+            'success': True,
+            'files': files
+        })
+    except Exception as e:
+        print(f"Error getting shared files: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/share_p2p_file', methods=['POST'])
+@login_required
+def share_p2p_file():
+    # Your second implementation here
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'})
+            
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'})
+            
+        # Get node
+        node = chat_nodes.get(str(current_user.id))
+        if not node:
+            return jsonify({'success': False, 'error': 'Node not found'})
+            
+        # Add file to bucket
+        file_info = node.secure_bucket.add_file(
+            file.read(),
+            file.filename
+        )
+        
+        # Share with P2P network
+        node.p2p_network.share_file(file_info)
+        
+        return jsonify({
+            'success': True,
+            'file': file_info
+        })
+    except Exception as e:
+        print(f"Error sharing file: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@socketio.on('search_files')
+@authenticated_only
+def handle_file_search(data):
+    try:
+        query = data.get('query')
+        if not query:
+            emit('search_results', {'success': True, 'results': []})
+            return
+            
+        user_id = str(current_user.id)
+        node = chat_nodes.get(user_id)
+        if not node:
+            node = ChatNode(user_id, current_user.username)
+            chat_nodes[user_id] = node
+            
+        # Initiate P2P search
+        node.p2p_network.flood_search(query)
+        
+        # Wait briefly for responses
+        time.sleep(2)
+        
+        # Collect results
+        results = []
+        
+        # Add local results
+        local_files = node.secure_bucket.search_files(query)
+        for file in local_files:
+            results.append({
+                'name': file['name'],
+                'size': file['size'],
+                'username': 'You (Local)',
+                'source': {'host': node.p2p_network.host, 'port': node.p2p_network.port}
+            })
+        
+        # Add P2P results
+        for filename, sources in node.p2p_network.file_sources.items():
+            for source in sources:
+                results.append({
+                    'name': filename,
+                    'size': 0,  # Size not available for P2P files
+                    'username': f"Peer ({source[0]}:{source[1]})",
+                    'source': {'host': source[0], 'port': source[1], 'file_id': source[2]}
+                })
+        
+        emit('search_results', {
+            'success': True,
+            'results': results
+        })
+        
+    except Exception as e:
+        print(f"Error searching files: {e}")
+        emit('search_results', {
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/delete_file/<file_id>', methods=['DELETE'])
+@login_required
+def delete_file(file_id):
+    try:
+        node = chat_nodes.get(str(current_user.id))
+        if not node:
+            return jsonify({'success': False, 'error': 'Node not found'})
+            
+        success = node.secure_bucket.delete_file(file_id)
+        if success:
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': 'File not found'})
+            
+    except Exception as e:
+        print(f"Error deleting file: {e}")
+        return jsonify({'success': False, 'error': str(e)})

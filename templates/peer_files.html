@@ -22,20 +22,45 @@
         <!-- Main Content -->
         <div class="max-w-7xl mx-auto">
             <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                <!-- User Selection -->
+                <!-- Search Section -->
                 <div class="p-4 bg-gray-50 border-b">
-                    <div class="space-y-2">
-                        <select id="userSelect" class="w-full rounded-lg border-gray-300">
-                            <option value="">Select a peer...</option>
-                        </select>
-                        <p class="text-xs text-gray-500" id="selectedBucketHash"></p>
+                    <div class="flex space-x-2">
+                        <input type="text" 
+                               id="searchInput" 
+                               class="flex-1 rounded-lg border-gray-300"
+                               placeholder="Search for files across peers...">
+                        <button id="searchBtn" 
+                                class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                            <i class="fas fa-search mr-2"></i>Search
+                        </button>
                     </div>
                 </div>
 
-                <!-- Files List -->
+                <!-- File Upload Section -->
+                <div class="p-4 border-b">
+                    <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
+                        <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                            <p class="text-sm text-gray-500">Share File with Peers</p>
+                            <p class="text-xs text-gray-500">(Max: 10MB)</p>
+                        </div>
+                        <input id="fileInput" type="file" class="hidden" />
+                    </label>
+                </div>
+
+                <!-- Results Section -->
                 <div class="p-4">
-                    <div id="filesList" class="space-y-2">
-                        <!-- Files will be listed here -->
+                    <h3 class="text-sm font-medium text-gray-700 mb-3">Search Results</h3>
+                    <div id="searchResults" class="space-y-2 max-h-[200px] overflow-y-auto">
+                        <!-- Search results will appear here -->
+                    </div>
+                </div>
+
+                <!-- Available Files Section -->
+                <div class="p-4 border-t">
+                    <h3 class="text-sm font-medium text-gray-700 mb-3">My Shared Files</h3>
+                    <div id="mySharedFiles" class="space-y-2 max-h-[200px] overflow-y-auto">
+                        <!-- Shared files will appear here -->
                     </div>
                 </div>
             </div>

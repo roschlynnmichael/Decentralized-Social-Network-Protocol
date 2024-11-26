@@ -1,13 +1,30 @@
 import hashlib
 import time
 from typing import Dict, List
+import socket
 from python_scripts.public_chat.secure_bucket import SecureBucket
+from python_scripts.public_chat.p2p_flood import P2PFloodNetwork
 
 class ChatNode:
     def __init__(self, node_id: str, username: str):
         self.node_id = node_id
         self.username = username
         self.secure_bucket = SecureBucket(node_id, username)
+        
+        # Initialize P2P flooding network
+        self.p2p_network = P2PFloodNetwork(
+            host='0.0.0.0',  # Listen on all interfaces
+            port=self._get_available_port(),
+            username=username
+        )
+    
+    def _get_available_port(self):
+        """Get an available port for P2P communication"""
+        sock = socket.socket()
+        sock.bind(('', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        return port
 
     def broadcast_message(self, content: str) -> Dict:
         """Create and broadcast a new message"""
