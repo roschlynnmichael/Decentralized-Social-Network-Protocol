@@ -108,8 +108,16 @@
                 <div class="col-span-1 space-y-6">
                     <!-- Incoming Requests -->
                     <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <div class="p-4 bg-gray-50 border-b">
+                        <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
                             <h2 class="text-lg font-semibold text-gray-700">Download Requests</h2>
+                            <div class="flex items-center space-x-2">
+                                <button id="clearAllRequestsBtn" 
+                                        class="inline-flex items-center px-3 py-1 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600">
+                                    <i class="fas fa-trash-alt mr-2"></i>
+                                    Clear All Requests
+                                </button>
+                                <span class="text-xs text-gray-500" id="receivedBucketHash">Loading...</span>
+                            </div>
                         </div>
                         <div class="p-4">
                             <div id="incomingRequestsList" class="space-y-2">
@@ -120,12 +128,13 @@
 
                     <!-- My Requests -->
                     <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <div class="p-4 bg-gray-50 border-b">
+                        <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
                             <h2 class="text-lg font-semibold text-gray-700">My Requests</h2>
+                            <span class="text-xs text-gray-500" id="sentBucketHash">Loading...</span>
                         </div>
                         <div class="p-4">
                             <div id="myRequestsList" class="space-y-2">
-                                <!-- My requests will be listed here -->
+                                <!-- Requests will be dynamically inserted here -->
                             </div>
                         </div>
                     </div>
@@ -141,10 +150,11 @@
                         <div class="p-4">
                             <div class="space-y-4">
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Select File to Broadcast</label>
-                                    <select id="broadcastFileSelect" class="w-full rounded-lg border-gray-300">
-                                        <option value="">Select a file...</option>
-                                    </select>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Enter File ID to Broadcast</label>
+                                    <input type="text" 
+                                           id="broadcastFileInput" 
+                                           class="w-full rounded-lg border-gray-300"
+                                           placeholder="Enter file ID...">
                                 </div>
                                 <button id="broadcastBtn" class="w-full inline-flex justify-center items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
                                     <i class="fas fa-broadcast-tower mr-2"></i>
@@ -214,5 +224,9 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="{{ url_for('static', filename='js/public_chat.js') }}"></script>
+    <script>
+        // Add this before your main JavaScript
+        const currentUserId = "{{ current_user.id }}";
+    </script>
 </body>
 </html>

@@ -6,7 +6,7 @@ import time
 class BucketManager:
     def __init__(self):
         self.buckets_file = "data/user_buckets.json"
-        self.buckets_data = {}  # user_id -> {hash, created_at} mapping
+        self.buckets_data = {}  # user_id -> {hash, sent_requests_hash, received_requests_hash, created_at} mapping
         self._init_buckets_file()
         
     def _init_buckets_file(self):
@@ -53,3 +53,27 @@ class BucketManager:
     def user_has_bucket(self, user_id: str) -> bool:
         """Check if user has a bucket"""
         return str(user_id) in self.buckets_data
+
+    def update_sent_requests_hash(self, user_id: str, hash: str):
+        """Update sent requests hash for user"""
+        if str(user_id) not in self.buckets_data:
+            self.buckets_data[str(user_id)] = {}
+        self.buckets_data[str(user_id)]['sent_requests_hash'] = hash
+        self._save_buckets_data()
+
+    def update_received_requests_hash(self, user_id: str, hash: str):
+        """Update received requests hash for user"""
+        if str(user_id) not in self.buckets_data:
+            self.buckets_data[str(user_id)] = {}
+        self.buckets_data[str(user_id)]['received_requests_hash'] = hash
+        self._save_buckets_data()
+
+    def get_sent_requests_hash(self, user_id: str) -> Optional[str]:
+        """Get sent requests hash for user"""
+        bucket_info = self.buckets_data.get(str(user_id), {})
+        return bucket_info.get('sent_requests_hash')
+
+    def get_received_requests_hash(self, user_id: str) -> Optional[str]:
+        """Get received requests hash for user"""
+        bucket_info = self.buckets_data.get(str(user_id), {})
+        return bucket_info.get('received_requests_hash')

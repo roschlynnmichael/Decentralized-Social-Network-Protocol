@@ -1887,3 +1887,157 @@ def handle_clear_chat():
     except Exception as e:
         print(f"Error clearing chat history: {e}")
         emit('error', {'message': str(e)})
+
+@socketio.on('get_requests')
+@authenticated_only
+def handle_get_requests():
+    try:
+        user_id = str(current_user.id)
+        node = chat_nodes.get(user_id)
+        if not node:
+            return
+            
+        requests = node.secure_bucket.get_requests()
+        
+        # Send both types of requests
+        emit('my_requests', {'requests': requests['sent']})
+        emit('received_requests', {'requests': requests['received']})
+            
+    except Exception as e:
+        print(f"Error getting requests: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('broadcast_file_request')
+@authenticated_only
+def handle_file_request(data):
+    try:
+        user_id = str(current_user.id)
+        node = chat_nodes.get(user_id)
+        if not node:
+            return
+            
+        # Add user info to request
+        request_data = {
+            'filename': data.get('filename'),
+            'timestamp': time.time(),
+            'status': 'pending',
+            'outgoing': True,
+            'requester_id': user_id,
+            'username': current_user.username
+        }
+        
+        # Add request to bucket
+        node.secure_bucket.add_file_request(request_data)
+        
+        # Get updated requests
+        requests = node.secure_bucket.get_requests()
+        
+        # Send updated lists to all users
+        emit('my_requests', {'requests': requests['sent']}, room=user_id)
+        emit('received_requests', {'requests': requests['received']}, broadcast=True)
+            
+    except Exception as e:
+        print(f"Error handling file request: {e}")
+        emit('error', {'message': str(e)})
+
+# Add this near your other global variables at the top
+stored_requests = {}  # Dictionary to store requests by user_id
+
+@socketio.on('get_requests')
+@authenticated_only
+def handle_get_requests():
+    try:
+        user_id = str(current_user.id)
+        node = chat_nodes.get(user_id)
+        if not node:
+            return
+            
+        requests = node.secure_bucket.get_requests()
+        
+        # Add requestor flag to sent requests
+        sent_requests = [{**req, 'requestor': True} for req in requests['sent']]
+        # Add requestor flag to received requests
+        received_requests = [{**req, 'requestor': True} for req in requests['received']]
+        
+        # Send both types of requests with requestor flag
+        emit('my_requests', {'requests': sent_requests})
+        emit('received_requests', {'requests': received_requests})
+            
+    except Exception as e:
+        print(f"Error getting requests: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('broadcast_file_request')
+@authenticated_only
+def handle_file_request(data):
+    try:
+        user_id = str(current_user.id)
+        node = chat_nodes.get(user_id)
+        if not node:
+            return
+            
+        # Add user info to request
+        request_data = {
+            'filename': data.get('filename'),
+            'timestamp': time.time(),
+            'status': 'pending',
+            'requester_id': user_id,
+            'username': current_user.username,
+            'requestor': True
+        }
+        
+        # Add request to bucket and get both hashes
+        result = node.secure_bucket.add_file_request(request_data)
+        
+        # Get updated requests
+        requests = node.secure_bucket.get_requests()
+        
+        # Send updates to appropriate clients
+        if 'sent_hash' in result:
+            emit('my_requests', {'requests': requests['sent']}, room=user_id)
+        if 'received_hash' in result:
+            emit('received_requests', {'requests': requests['received']}, broadcast=True)
+            
+    except Exception as e:
+        print(f"Error handling file request: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('clear_all_requests')
+@authenticated_only
+def handle_clear_all_requests():
+    try:
+        user_id = str(current_user.id)
+        node = chat_nodes.get(user_id)
+        if not node:
+            return
+            
+        # Clear all requests
+        node.secure_bucket.clear_all_requests()
+        
+        # Get updated (empty) requests
+        requests = node.secure_bucket.get_requests()
+        
+        # Broadcast the cleared state to all users
+        emit('my_requests', {'requests': []}, broadcast=True)
+        emit('received_requests', {'requests': []}, broadcast=True)
+            
+    except Exception as e:
+        print(f"Error clearing all requests: {e}")
+        emit('error', {'message': str(e)})
+
+@socketio.on('get_chat_history')
+@authenticated_only
+def handle_get_chat_history():
+    try:
+        user_id = str(current_user.id)
+        node = chat_nodes.get(user_id)
+        if not node:
+            node = ChatNode(user_id, current_user.username)
+            chat_nodes[user_id] = node
+            
+        chat_history = node.get_chat_history()
+        emit('chat_history', {'messages': chat_history})
+            
+    except Exception as e:
+        print(f"Error getting chat history: {e}")
+        emit('error', {'message': str(e)})

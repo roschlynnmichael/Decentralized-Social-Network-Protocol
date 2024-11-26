@@ -25,7 +25,11 @@ class SecureBucket:
                 'last_updated': time.time()
             },
             'chat_history': [],
-            'files': {}
+            'files': {},
+            'file_requests': {  # Changed from 'requests' to be more specific
+                'sent': [],     
+                'received': []  
+            }
         }
         
         # Initialize or load existing bucket
@@ -34,27 +38,14 @@ class SecureBucket:
     def _init_bucket(self):
         """Initialize or load existing bucket"""
         try:
-            # Try to get existing bucket hash from IPFS
-            from app import bucket_manager  # Import here to avoid circular import
-            bucket_hash = bucket_manager.get_bucket_hash(self.node_id)
+            from app import bucket_manager
+            main_bucket_hash = bucket_manager.get_bucket_hash(self.node_id)
+            sent_requests_hash = bucket_manager.get_sent_requests_hash(self.node_id)
+            received_requests_hash = bucket_manager.get_received_requests_hash(self.node_id)
             
-            if bucket_hash:
-                print(f"Loading existing bucket with hash: {bucket_hash}")
-                # Get encrypted data from IPFS
-                encrypted_data = self.ipfs_handler.get_content(bucket_hash)
-                if encrypted_data:
-                    # Decrypt and load bucket structure
-                    self.bucket_structure = self._decrypt_data(encrypted_data)
-                    print(f"Loaded bucket with {len(self.bucket_structure.get('files', {}))} files")
-                else:
-                    print("Failed to load bucket data from IPFS")
-            else:
-                print("Creating new bucket")
-                # Create new bucket
-                self._save_bucket()
-        except Exception as e:
-            print(f"Error initializing bucket: {e}")
-            # Initialize empty bucket structure
+            print(f"Loading bucket data - Main: {main_bucket_hash}, Sent: {sent_requests_hash}, Received: {received_requests_hash}")
+            
+            # Initialize empty structures
             self.bucket_structure = {
                 'metadata': {
                     'owner_id': self.node_id,
@@ -65,11 +56,175 @@ class SecureBucket:
                 'chat_history': [],
                 'files': {}
             }
+            
+            self.sent_requests = []
+            self.received_requests = []
+            
+            # Load main bucket
+            if main_bucket_hash:
+                encrypted_data = self.ipfs_handler.get_content(main_bucket_hash)
+                if encrypted_data:
+                    loaded_structure = self._decrypt_data(encrypted_data)
+                    self._merge_bucket_structures(loaded_structure)
+            
+            # Load sent requests
+            if sent_requests_hash:
+                try:
+                    encrypted_data = self.ipfs_handler.get_content(sent_requests_hash)
+                    if encrypted_data:
+                        self.sent_requests = self._decrypt_data(encrypted_data)
+                        print(f"Loaded {len(self.sent_requests)} sent requests")
+                except Exception as e:
+                    print(f"Error loading sent requests: {e}")
+            
+            # Load received requests
+            if received_requests_hash:
+                try:
+                    encrypted_data = self.ipfs_handler.get_content(received_requests_hash)
+                    if encrypted_data:
+                        self.received_requests = self._decrypt_data(encrypted_data)
+                        print(f"Loaded {len(self.received_requests)} received requests")
+                except Exception as e:
+                    print(f"Error loading received requests: {e}")
+                    
+        except Exception as e:
+            print(f"Error initializing buckets: {e}")
+            raise
+
+    def _merge_bucket_structures(self, loaded_structure):
+        """Merge loaded structure with current structure while preserving existing data"""
+        for key, value in loaded_structure.items():
+            if key in self.bucket_structure:
+                if isinstance(value, dict):
+                    self.bucket_structure[key].update(value)
+                elif isinstance(value, list):
+                    self.bucket_structure[key].extend(value)
+                else:
+                    self.bucket_structure[key] = value
 
     def _encrypt_data(self, data: dict) -> bytes:
         """Encrypt data before storing in IPFS"""
         json_data = json.dumps(data)
         return self.cipher_suite.encrypt(json_data.encode())
+    
+    def add_file_request(self, request_data: Dict) -> Dict[str, str]:
+        """Add file request and return both bucket hashes"""
+        try:
+            from app import bucket_manager
+
+            # Generate unique ID for request if not present
+            if 'id' not in request_data:
+                request_data['id'] = hashlib.sha256(f"{self.node_id}:{time.time()}".encode()).hexdigest()
+
+            result = {}
+            
+            # Add request to appropriate list and get hash
+            if request_data.get('requester_id') == self.node_id:
+                self.sent_requests.append(request_data)
+                encrypted_data = self._encrypt_data(self.sent_requests)
+                sent_hash = self.ipfs_handler.add_content(encrypted_data)
+                bucket_manager.update_sent_requests_hash(self.node_id, sent_hash)
+                result['sent_hash'] = sent_hash
+            else:
+                self.received_requests.append(request_data)
+                encrypted_data = self._encrypt_data(self.received_requests)
+                received_hash = self.ipfs_handler.add_content(encrypted_data)
+                bucket_manager.update_received_requests_hash(self.node_id, received_hash)
+                result['received_hash'] = received_hash
+
+            return result
+
+        except Exception as e:
+            print(f"Error adding file request: {e}")
+            raise
+
+    def get_requests(self) -> Dict:
+        """Get all requests from both buckets"""
+        try:
+            from app import bucket_manager
+            
+            # Get hashes from bucket manager
+            sent_hash = bucket_manager.get_sent_requests_hash(self.node_id)
+            received_hash = bucket_manager.get_received_requests_hash(self.node_id)
+            
+            # Initialize empty lists
+            sent_requests = []
+            received_requests = []
+            
+            # Load sent requests if hash exists
+            if sent_hash:
+                try:
+                    encrypted_data = self.ipfs_handler.get_content(sent_hash)
+                    if encrypted_data:
+                        sent_requests = self._decrypt_data(encrypted_data)
+                except Exception as e:
+                    print(f"Error loading sent requests: {e}")
+            
+            # Load received requests if hash exists
+            if received_hash:
+                try:
+                    encrypted_data = self.ipfs_handler.get_content(received_hash)
+                    if encrypted_data:
+                        received_requests = self._decrypt_data(encrypted_data)
+                except Exception as e:
+                    print(f"Error loading received requests: {e}")
+            
+            return {
+                'sent': sent_requests,
+                'received': received_requests
+            }
+            
+        except Exception as e:
+            print(f"Error getting requests: {e}")
+            return {'sent': [], 'received': []}
+
+    def clear_all_requests(self):
+        """Clear all requests from bucket"""
+        try:
+            from app import bucket_manager
+            # Clear both sent and received requests
+            self.sent_requests = []
+            self.received_requests = []
+            
+            # Save empty states to IPFS
+            sent_hash = self.ipfs_handler.add_content(self._encrypt_data([]))
+            received_hash = self.ipfs_handler.add_content(self._encrypt_data([]))
+            
+            # Update bucket manager
+            bucket_manager.update_sent_requests_hash(self.node_id, sent_hash)
+            bucket_manager.update_received_requests_hash(self.node_id, received_hash)
+        
+        except Exception as e:
+            print(f"Error clearing all requests: {e}")
+            raise
+
+    def get_requests(self) -> Dict:
+        """Get all requests"""
+        # Filter requests based on user ID/username
+        sent = [r for r in self.sent_requests if r.get('requester_id') == self.node_id]
+        received = [r for r in self.received_requests if r.get('requester_id') != self.node_id]
+        
+        return {
+        'sent': sent,
+            'received': received
+        }
+
+    def get_requests(self) -> Dict:
+        """Get all requests"""
+        try:
+            # Filter sent requests - those created by current user
+            sent = [r for r in self.sent_requests if r.get('requester_id') == self.node_id]
+            
+            # Filter received requests - those created by other users
+            received = [r for r in self.received_requests if r.get('requester_id') != self.node_id]
+            
+            return {
+                'sent': sent,
+                'received': received
+            }
+        except Exception as e:
+            print(f"Error getting requests: {e}")
+            return {'sent': [], 'received': []}
 
     def _decrypt_data(self, encrypted_data: bytes) -> dict:
         """Decrypt data retrieved from IPFS"""

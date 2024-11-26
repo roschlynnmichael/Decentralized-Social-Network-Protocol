@@ -16,6 +16,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const messageInput = document.getElementById('messageInput');
     const sendMessageBtn = document.getElementById('sendMessageBtn');
     const chatMessages = document.getElementById('chatMessages');
+    const broadcastFileInput = document.getElementById('broadcastFileInput');
+    const broadcastBtn = document.getElementById('broadcastBtn');
+    const myRequestsList = document.getElementById('myRequestsList');
+    const incomingRequestsList = document.getElementById('incomingRequestsList');
 
     // P2P Chat Class
     class P2PChat {
@@ -32,12 +36,12 @@ document.addEventListener('DOMContentLoaded', function() {
             // Add a Set to track processed messages
             this.processedMessages = new Set();
 
-            // Add handler for chat history cleared event
-            this.socket.on('chat_history_cleared', (data) => {
-                if (data.success) {
-                    this.chatMessages.innerHTML = '';
-                    this.processedMessages.clear();
-                }
+            // Initialize chat history from server
+            this.socket.emit('get_chat_history');
+            
+            // Add handler for chat history
+            this.socket.on('chat_history', (data) => {
+                this.displayChatHistory(data.messages);
             });
         }
 
@@ -91,6 +95,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         displayMessage(message, animate = false) {
+            // Add message ID check
+            if (!message.id) {
+                console.error('Message missing ID:', message);
+                return;
+            }
+            
             // Check if message has already been processed
             if (this.processedMessages.has(message.id)) {
                 return;
@@ -121,6 +131,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         displayChatHistory(messages) {
             this.chatMessages.innerHTML = '';
+            this.processedMessages.clear(); // Clear processed messages set
             messages.forEach(message => this.displayMessage(message));
         }
 
@@ -197,6 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Connected to server');
         socket.emit('get_user_info');
         socket.emit('check_bucket');
+        socket.emit('get_requests');
     });
 
     socket.on('bucket_status', (data) => {
@@ -204,13 +216,15 @@ document.addEventListener('DOMContentLoaded', function() {
         if (data.has_bucket) {
             showMainArea(data.bucket_hash);
             loadMyFiles();
+            // Only get requests after bucket is confirmed
+            socket.emit('get_requests');
         } else {
             showBucketWarning();
         }
     });
 
     socket.on('user_info', (data) => {
-        currentUserId = data.user_id;
+        currentUserId = data.user_id.toString();
         currentUsername = data.username;
         console.log('User info received:', data);
         
@@ -222,6 +236,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const clearChatBtn = document.getElementById('clearChatBtn');
             clearChatBtn.addEventListener('click', () => p2pChat.clearChatHistory());
         }
+        
+        // Fetch requests after user info is received
+        socket.emit('get_requests');
+    });
+
+    socket.on('file_request', (data) => {
+        displayFileRequest.isProcessingMultiple = true;
+        displayFileRequest(data);
+        displayFileRequest.isProcessingMultiple = false;
+    });
+    
+    socket.on('my_requests', (data) => {
+        console.log('Received my requests:', data.requests);
+        displayMyRequests(data.requests);
     });
 
     socket.on('chat_message', (data) => {
@@ -287,6 +315,87 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function loadMyFiles() {
         socket.emit('get_my_files');
+    }
+
+    function displayFileRequest(request) {
+        if (!displayFileRequest.isProcessingMultiple) {
+            incomingRequestsList.innerHTML = '';
+        }
+        
+        // Only display if this is someone else's request (they are the requestor)
+        if (request.requestor && request.requester_id !== currentUserId) {
+            const requestDiv = document.createElement('div');
+            requestDiv.className = 'p-3 bg-gray-50 rounded-lg mb-2 request-item';
+            requestDiv.innerHTML = `
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm font-medium">${request.username || 'Unknown User'}</p>
+                        <p class="text-xs text-gray-500">Requesting: ${request.filename}</p>
+                        <p class="text-xs text-gray-400">${new Date(request.timestamp * 1000).toLocaleString()}</p>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button class="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600" 
+                                onclick="handleShareFile('${request.id}')">
+                            Share
+                        </button>
+                        <button class="px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600" 
+                                onclick="declineRequest('${request.id}')">
+                            Decline
+                        </button>
+                    </div>
+                </div>
+            `;
+            incomingRequestsList.appendChild(requestDiv);
+        }
+        
+        // Only show "no requests" message if list is empty and we're not in the middle of processing multiple
+        if (!displayFileRequest.isProcessingMultiple && incomingRequestsList.children.length === 0) {
+            incomingRequestsList.innerHTML = `
+                <div class="p-3 text-sm text-gray-500 text-center">
+                    No pending download requests
+                </div>
+            `;
+        }
+    }
+
+    function displayMyRequests(requests) {
+        myRequestsList.innerHTML = '';
+        
+        if (requests && requests.length > 0) {
+            requests.forEach(request => {
+                const requestDiv = document.createElement('div');
+                requestDiv.className = 'p-3 bg-gray-50 rounded-lg mb-2 request-item';
+                
+                // Create request content based on whether user is requester or receiver
+                const isRequester = request.requestor || request.requester_id === currentUserId;
+                
+                requestDiv.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <p class="text-sm font-medium">${isRequester ? 'Your Request' : `Request from ${request.username}`}</p>
+                            <p class="text-xs text-gray-500">File: ${request.filename}</p>
+                            <p class="text-xs text-gray-500">Status: ${request.status}</p>
+                            <p class="text-xs text-gray-500">Time: ${new Date(request.timestamp * 1000).toLocaleString()}</p>
+                        </div>
+                        <div class="flex space-x-2">
+                            ${request.status === 'pending' ? `
+                                <button onclick="cancelRequest('${request.id}')" 
+                                    class="px-3 py-1 text-xs text-red-600 hover:text-red-800">
+                                    Cancel
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+                myRequestsList.appendChild(requestDiv);
+            });
+        } else {
+            myRequestsList.innerHTML = `
+                <div class="p-3 text-sm text-gray-500 text-center">
+                    No pending requests
+                </div>
+            `;
+        }
     }
 
     socket.on('my_files_list', (data) => {
@@ -423,5 +532,108 @@ document.addEventListener('DOMContentLoaded', function() {
             // Redirect to login page
             window.location.href = '/login';
         }
+        alert(`Error: ${data.message}`);
     });
+
+    broadcastBtn?.addEventListener('click', () => {
+        const filename = broadcastFileInput.value.trim();
+        if (!filename) {
+            alert('Please enter a filename');
+            return;
+        }
+
+        socket.emit('broadcast_file_request', {
+            filename: filename,
+            timestamp: Date.now() / 1000,
+            status: 'pending',
+            outgoing: true  // Mark as outgoing request
+        });
+
+        // Clear input
+        broadcastFileInput.value = '';
+    });
+
+    // Add a flag to track batch processing of requests
+    displayFileRequest.isProcessingMultiple = false;
+
+    // Add a handler for incoming requests list
+    socket.on('incoming_requests', (data) => {
+        displayFileRequest.isProcessingMultiple = true;
+        if (data.requests && data.requests.length > 0) {
+            data.requests.forEach(request => displayFileRequest(request));
+        } else {
+            incomingRequestsList.innerHTML = `
+                <div class="p-3 text-sm text-gray-500 text-center">
+                    No pending download requests
+                </div>
+            `;
+        }
+        displayFileRequest.isProcessingMultiple = false;
+    });
+
+    socket.on('received_requests', (data) => {
+        displayFileRequest.isProcessingMultiple = true;
+        incomingRequestsList.innerHTML = '';
+        
+        if (data.requests && data.requests.length > 0) {
+            data.requests.forEach(request => {
+                displayFileRequest(request);
+            });
+        } else {
+            incomingRequestsList.innerHTML = `
+                <div class="p-3 text-sm text-gray-500 text-center">
+                    No pending download requests
+                </div>
+            `;
+        }
+        displayFileRequest.isProcessingMultiple = false;
+    });
+
+    socket.on('sent_requests', (data) => {
+        displayMyRequests(data.requests);
+    });
+
+    // Add this with your other event listeners
+    document.getElementById('clearAllRequestsBtn').addEventListener('click', function() {
+        if (confirm('Are you sure you want to clear all requests? This action cannot be undone.')) {
+            socket.emit('clear_all_requests');
+        }
+    });
+
+    // Add these socket listeners if not already present
+    socket.on('my_requests', (data) => {
+        displayMyRequests(data.requests);
+    });
+
+    socket.on('received_requests', (data) => {
+        displayFileRequest.isProcessingMultiple = true;
+        incomingRequestsList.innerHTML = '';
+        
+        if (data.requests && data.requests.length > 0) {
+            data.requests.forEach(request => {
+                displayFileRequest(request);
+            });
+        } else {
+            incomingRequestsList.innerHTML = `
+                <div class="p-3 text-sm text-gray-500 text-center">
+                    No pending download requests
+                </div>
+            `;
+        }
+        displayFileRequest.isProcessingMultiple = false;
+    });
+
+    // Update the request update handler
+    socket.on('request_update', (data) => {
+        console.log('Request update received:', data);
+        if (data.type === 'new') {
+            // Refresh both lists to ensure consistency
+            socket.emit('get_requests');
+        }
+    });
+
+    // Add periodic refresh of requests
+    setInterval(() => {
+        socket.emit('get_requests');
+    }, 30000); // Refresh every 30 seconds
 });
